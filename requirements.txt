@@ -4,3 +4,5 @@ scikit-learn
 streamlit
 plotly
 matplotlib
+openpyxl
+rapidfuzz
