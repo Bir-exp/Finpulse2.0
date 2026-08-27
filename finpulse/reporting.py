@@ -207,8 +207,12 @@ def build_score_presentation(score_result: dict[str, Any]) -> ScorePresentation:
     )
 
     if provisional and not stability_available and renormalized:
+        unavailable_reason = stability.get(
+            "unavailable_reason",
+            "Uploaded bank credits are not treated as recurring income history.",
+        )
         explanation = (
-            "Stability is unavailable for this history. The available 80 points "
+            f"Stability is unavailable. {unavailable_reason} The available 80 points "
             "were normalized to 100, so this score is provisional and is not "
             "equivalent to a full-history score."
         )

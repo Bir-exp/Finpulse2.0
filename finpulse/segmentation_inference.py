@@ -196,7 +196,17 @@ def prepare_segmentation_features(
         if isinstance(value, bool) or not isinstance(value, Real):
             prepared[name] = None
             availability[name] = "Unavailable"
-            reasons.append(f"{name} is unavailable; it was not imputed")
+            if (
+                name == "income_cv"
+                and features.get("income_cv_source")
+                == "unavailable_bank_credits_not_used_as_income_history"
+            ):
+                reasons.append(
+                    "income_cv is unavailable because uploaded bank credits are "
+                    "not treated as recurring income history; it was not imputed"
+                )
+            else:
+                reasons.append(f"{name} is unavailable; it was not imputed")
             continue
         numeric = float(value)
         if not np.isfinite(numeric):

@@ -328,7 +328,9 @@ def _render_report(report: FinPulseReport) -> None:
     snapshot[2].metric(
         "Estimated remaining", _money(statement.get("remaining_amount_estimate"))
     )
-    snapshot[3].metric("Statement coverage", f"{statement['coverage_days']} days")
+    snapshot[3].metric(
+        "Analyzed debit coverage", f"{statement['coverage_days']} days"
+    )
     snapshot[4].metric("Analyzed transactions", statement["transaction_count"])
 
     budget = analytics.budget_summary
@@ -350,13 +352,25 @@ def _render_report(report: FinPulseReport) -> None:
             f"{variance_direction} the supplied budget."
         )
 
-    st.subheader("2. Spending Breakdown")
-    income = report.category_breakdown.set_index("category").loc["Income"]
-    st.metric(
-        "Observed Income / Credits",
-        _money(income["total"]),
-        help="Displayed separately and never included in the debit-spending chart.",
+    st.markdown("#### Statement Cash Flow (informational)")
+    cash_flow = analytics.statement_cash_flow_summary
+    cash_columns = st.columns(4)
+    cash_columns[0].metric("Observed credits", _money(cash_flow["observed_credits"]))
+    cash_columns[1].metric("Observed debits", _money(cash_flow["observed_debits"]))
+    cash_columns[2].metric(
+        "Net statement cash flow", _money(cash_flow["net_statement_cash_flow"])
     )
+    cash_columns[3].metric(
+        "Spending considered for analysis",
+        _money(cash_flow["spending_considered_for_analysis"]),
+    )
+    st.caption(
+        "Statement cash flow describes what happened in the account and includes "
+        "the full reviewed statement. FinPulse behavioral analytics use the "
+        "user-declared Monthly Available Amount and included debit transactions only."
+    )
+
+    st.subheader("2. Spending Breakdown")
     spending = report.debit_spending_breakdown.copy()
     positive_spending = spending.loc[spending["monthly_normalized"] > 0]
     if positive_spending.empty:
@@ -484,7 +498,15 @@ def _render_report(report: FinPulseReport) -> None:
         for reason in persona.reasons:
             st.caption(reason)
     else:
-        st.metric("Behavioral Segment", "Needs more history")
+        credit_incompatibility = any(
+            "bank credits" in reason.casefold() for reason in persona.reasons
+        )
+        unavailable_label = (
+            "Unavailable for uploaded statements"
+            if credit_incompatibility
+            else "Needs more history"
+        )
+        st.metric("Behavioral Segment", unavailable_label)
         for reason in persona.reasons:
             st.markdown(f"- {reason}")
         st.caption(

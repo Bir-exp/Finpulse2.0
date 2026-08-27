@@ -4,6 +4,7 @@ from unittest import mock
 
 import pandas as pd
 
+from finpulse.segmentation_inference import FEATURE_NAMES
 from finpulse.upload_analytics import analyze_reviewed_transactions
 
 
@@ -52,7 +53,7 @@ def repeated_full_months(month_count=6):
     for position, period in enumerate(periods):
         rows.extend([
             transaction(period.start_time, 5000 + position * 100, "credit", "Income"),
-            transaction(period.start_time + pd.Timedelta(days=5), 1200 + position * 50, "debit", "Essentials"),
+            transaction(period.start_time, 1200 + position * 50, "debit", "Essentials"),
             transaction(period.start_time + pd.Timedelta(days=10), 300 + position * 30, "debit", "Desire"),
         ])
     rows.append(transaction(periods[-1].end_time.normalize(), 100, "debit", "Others"))
@@ -60,6 +61,79 @@ def repeated_full_months(month_count=6):
 
 
 class UploadAnalyticsTests(unittest.TestCase):
+    def test_large_credit_does_not_change_behavioral_outputs(self):
+        debit_rows = [
+            transaction("2024-01-01", 1000, "debit", "Essentials"),
+            transaction("2024-01-10", 500, "debit", "Desire"),
+            transaction("2024-01-20", 300, "debit", "Repayment"),
+            transaction("2024-01-31", 400, "debit", "Investment/Savings"),
+        ]
+        with_credit = debit_rows + [
+            transaction("2024-01-15", 1_000_000, "credit", "Income")
+        ]
+        baseline = analyze_reviewed_transactions(pd.DataFrame(debit_rows), 5000)
+        credited = analyze_reviewed_transactions(pd.DataFrame(with_credit), 5000)
+
+        ratio_features = (
+            "avg_essential_ratio",
+            "avg_desire_ratio",
+            "avg_repayment_ratio",
+            "avg_investment_ratio",
+            "avg_other_ratio",
+            "avg_expense_ratio",
+            "avg_surplus_ratio",
+        )
+        for feature in ratio_features:
+            self.assertEqual(
+                baseline.behavioral_features[feature],
+                credited.behavioral_features[feature],
+            )
+        self.assertEqual(baseline.score_result, credited.score_result)
+        self.assertEqual(baseline.signals, credited.signals)
+        self.assertEqual(baseline.recommendations, credited.recommendations)
+        self.assertEqual(
+            {name: baseline.behavioral_features[name] for name in FEATURE_NAMES},
+            {name: credited.behavioral_features[name] for name in FEATURE_NAMES},
+        )
+
+    def test_credits_remain_visible_in_statement_cash_flow(self):
+        rows = [
+            transaction("2024-01-01", 5000, "credit", "Income"),
+            transaction("2024-01-31", 1200, "debit", "Essentials"),
+        ]
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        cash_flow = result.statement_cash_flow_summary
+        self.assertEqual(cash_flow["observed_credits"], 5000)
+        self.assertEqual(cash_flow["observed_debits"], 1200)
+        self.assertEqual(cash_flow["net_statement_cash_flow"], 3800)
+        self.assertEqual(cash_flow["spending_considered_for_analysis"], 1200)
+
+    def test_excluded_credit_remains_visible_only_in_raw_cash_flow(self):
+        rows = [
+            transaction(
+                "2024-01-01",
+                20000,
+                "credit",
+                "Income",
+                include_in_analysis=False,
+            ),
+            transaction("2024-01-31", 1000, "debit", "Essentials"),
+        ]
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        self.assertEqual(result.statement_cash_flow_summary["observed_credits"], 20000)
+        self.assertEqual(result.observed_income_summary["total_credit_inflow"], 0)
+        self.assertIsNone(result.behavioral_features["income_cv"])
+
+    def test_upload_stability_is_unavailable_even_with_long_credit_history(self):
+        rows = repeated_full_months(6)
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        stability = result.score_result["components"]["stability"]
+        self.assertFalse(stability["available"])
+        self.assertIsNone(stability["score"])
+        self.assertIsNone(result.behavioral_features["income_cv"])
+        self.assertTrue(result.score_result["is_provisional"])
+        self.assertIn("bank credits", stability["unavailable_reason"])
+
     def test_excluded_debit_does_not_count_toward_spending(self):
         rows = [
             transaction("2024-01-01", 1000, "debit", "Essentials"),
@@ -76,6 +150,11 @@ class UploadAnalyticsTests(unittest.TestCase):
         self.assertEqual(result.statement_summary["original_reviewed_transaction_count"], 2)
         self.assertEqual(result.statement_summary["included_transaction_count"], 1)
         self.assertEqual(result.statement_summary["excluded_transaction_count"], 1)
+        self.assertEqual(
+            result.statement_cash_flow_summary["spending_considered_for_analysis"],
+            1000,
+        )
+        self.assertEqual(result.statement_cash_flow_summary["observed_debits"], 21000)
 
     def test_excluded_desire_does_not_affect_ratio(self):
         rows = [
@@ -136,7 +215,9 @@ class UploadAnalyticsTests(unittest.TestCase):
         result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
         self.assertEqual(result.observed_income_summary["observed_income_credits"], 10000)
         self.assertEqual(result.observed_income_summary["total_credit_inflow"], 10000)
-        self.assertEqual(result.behavioral_features["income_cv"], 0.0)
+        self.assertIsNone(result.behavioral_features["income_cv"])
+        self.assertFalse(result.data_quality["stability_features_available"])
+        self.assertEqual(result.statement_cash_flow_summary["observed_credits"], 30000)
 
     def test_explicitly_included_rows_match_legacy_behavior(self):
         included = pd.DataFrame(normal_month_rows())
@@ -189,7 +270,7 @@ class UploadAnalyticsTests(unittest.TestCase):
             pd.DataFrame(normal_month_rows()),
             monthly_available_amount=5000,
         )
-        self.assertEqual(result.statement_summary["coverage_days"], 31)
+        self.assertEqual(result.statement_summary["coverage_days"], 27)
         self.assertEqual(result.statement_summary["normalization_months"], 1.0)
         self.assertEqual(result.behavioral_features["avg_essential_ratio"], 0.2)
 
@@ -204,12 +285,12 @@ class UploadAnalyticsTests(unittest.TestCase):
 
         result = analyze_reviewed_transactions(frame, 5000)
 
-        self.assertEqual(result.statement_summary["normalization_months"], 2.0)
+        self.assertEqual(result.statement_summary["normalization_months"], 1.871)
         self.assertEqual(
             result.category_summary["Essentials"]["monthly_normalized"],
-            1000.0,
+            1068.97,
         )
-        self.assertEqual(result.behavioral_features["avg_essential_ratio"], 0.2)
+        self.assertEqual(result.behavioral_features["avg_essential_ratio"], 0.2138)
 
     def test_short_statement_has_low_analytical_confidence(self):
         rows = [
@@ -282,7 +363,8 @@ class UploadAnalyticsTests(unittest.TestCase):
         ]
         result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
         self.assertEqual(result.statement_summary["total_debit_spending"], 1000)
-        self.assertEqual(result.category_summary["Income"]["total"], 5000)
+        self.assertEqual(result.category_summary["Income"]["total"], 0)
+        self.assertEqual(result.statement_cash_flow_summary["observed_credits"], 5000)
 
     def test_category_aggregates(self):
         result = analyze_reviewed_transactions(
@@ -308,7 +390,11 @@ class UploadAnalyticsTests(unittest.TestCase):
             columns=["balance", "transaction_id"]
         )
         result = analyze_reviewed_transactions(frame, 5000)
-        self.assertEqual(result.statement_summary["transaction_count"], len(frame))
+        self.assertEqual(result.statement_summary["transaction_count"], 5)
+        self.assertEqual(
+            result.statement_summary["original_reviewed_transaction_count"],
+            len(frame),
+        )
 
     def test_score_is_within_valid_range(self):
         result = analyze_reviewed_transactions(
@@ -339,14 +425,16 @@ class UploadAnalyticsTests(unittest.TestCase):
         self.assertFalse(any("rising" in signal.lower() for signal in result.signals))
         self.assertFalse(any("recently" in rec["recommendation"].lower() for rec in result.recommendations))
 
-    def test_six_complete_months_enable_stability_and_trends(self):
+    def test_six_complete_months_enable_debit_trends_but_not_stability(self):
         frame = pd.DataFrame(repeated_full_months(6))
         result = analyze_reviewed_transactions(frame, 5000)
-        self.assertTrue(result.data_quality["stability_features_available"])
+        self.assertFalse(result.data_quality["stability_features_available"])
         self.assertTrue(result.data_quality["trend_features_available"])
-        self.assertIsNotNone(result.behavioral_features["income_cv"])
+        self.assertIsNone(result.behavioral_features["income_cv"])
+        self.assertIsNone(result.behavioral_features["income_change_3m"])
         self.assertIsNotNone(result.behavioral_features["desire_ratio_change_3m"])
-        self.assertTrue(result.score_result["components"]["stability"]["available"])
+        self.assertFalse(result.score_result["components"]["stability"]["available"])
+        self.assertTrue(result.score_result["is_provisional"])
 
     def test_empty_input_fails_clearly(self):
         with self.assertRaisesRegex(ValueError, "at least one transaction"):
@@ -365,7 +453,11 @@ class UploadAnalyticsTests(unittest.TestCase):
             side_effect=AssertionError("database access is forbidden"),
         ):
             result = analyze_reviewed_transactions(frame, 5000)
-        self.assertEqual(result.statement_summary["transaction_count"], len(frame))
+        self.assertEqual(result.statement_summary["transaction_count"], 5)
+        self.assertEqual(
+            result.statement_summary["original_reviewed_transaction_count"],
+            len(frame),
+        )
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
-"""In-memory behavioral analytics for confirmed uploaded transactions.
+"""In-memory cash-flow reporting and debit-based behavioral analytics.
 
 The upload path deliberately does not use SQLite. It adapts reviewed statement
-data to the existing FinPulse score, signal, and recommendation functions while
-keeping unavailable history-dependent features explicit.
+data to the existing FinPulse score, signal, and recommendation functions.
+Full statement credits/debits remain informational; only included debits and
+the declared Monthly Available Amount contribute to behavioral features.
 """
 
 from __future__ import annotations
@@ -47,6 +48,9 @@ TREND_COLUMNS = (
     "expense_ratio_change_3m",
     "surplus_ratio_change_3m",
 )
+DEBIT_TREND_COLUMNS = tuple(
+    column for column in TREND_COLUMNS if column != "income_change_3m"
+)
 
 
 @dataclass
@@ -60,6 +64,7 @@ class UploadAnalyticsResult:
     data_quality: dict[str, Any]
     budget_summary: dict[str, Any] | None
     observed_income_summary: dict[str, Any]
+    statement_cash_flow_summary: dict[str, Any]
     monthly_summary: pd.DataFrame
 
 
@@ -76,7 +81,7 @@ def _validate_inputs(
     transactions: pd.DataFrame,
     monthly_available_amount: object,
     monthly_budget: object,
-) -> tuple[pd.DataFrame, float, float | None, int, int]:
+) -> tuple[pd.DataFrame, pd.DataFrame, float, float | None, int, int]:
     if not isinstance(transactions, pd.DataFrame):
         raise TypeError("reviewed_transactions must be a pandas DataFrame")
     if transactions.empty:
@@ -96,9 +101,11 @@ def _validate_inputs(
     validate_include_in_analysis(prepared)
 
     original_transaction_count = len(prepared)
-    prepared = prepared.loc[prepared["include_in_analysis"]].copy()
-    excluded_transaction_count = original_transaction_count - len(prepared)
-    if prepared.empty:
+    included_transaction_count = int(prepared["include_in_analysis"].sum())
+    excluded_transaction_count = (
+        original_transaction_count - included_transaction_count
+    )
+    if included_transaction_count == 0:
         raise ValueError(
             "No transactions are included in FinPulse analysis. Include at least "
             "one transaction before generating the report."
@@ -122,6 +129,15 @@ def _validate_inputs(
             "transaction_type must contain only 'debit' or 'credit'"
         )
 
+    behavioral_transactions = prepared.loc[
+        prepared["include_in_analysis"]
+        & (prepared["transaction_type"] == "debit")
+    ].copy()
+    if behavioral_transactions.empty:
+        raise ValueError(
+            "No included debit transactions are available for behavioral analysis."
+        )
+
     monthly_amount = _positive_number(
         monthly_available_amount,
         "monthly_available_amount",
@@ -132,9 +148,10 @@ def _validate_inputs(
         budget = _positive_number(monthly_budget, "monthly_budget")
     return (
         prepared.sort_values("date").copy(),
+        behavioral_transactions.sort_values("date").copy(),
         monthly_amount,
         budget,
-        original_transaction_count,
+        included_transaction_count,
         excluded_transaction_count,
     )
 
@@ -256,9 +273,6 @@ def _trend_features(complete_months: pd.DataFrame) -> dict[str, float | None]:
     previous = last_six.iloc[:3]
     recent = last_six.iloc[3:]
     trends.update({
-        "income_change_3m": (
-            recent["observed_income"].mean() - previous["observed_income"].mean()
-        ),
         "desire_ratio_change_3m": (
             recent["desire_ratio"].mean() - previous["desire_ratio"].mean()
         ),
@@ -326,17 +340,12 @@ def _behavioral_features(
         else None
     )
 
-    complete_income = complete_months["observed_income"]
-    income_history_available = (
-        len(complete_income) >= 2 and bool((complete_income > 0).all())
-    )
-    income_std = float(complete_income.std()) if income_history_available else None
-    income_cv = (
-        income_std / float(complete_income.mean())
-        if income_history_available and float(complete_income.mean()) > 0
-        else None
-    )
-    stability_available = income_cv is not None and expense_volatility is not None
+    # Bank credits are contextual cash flow, not reliable recurring income.
+    # Upload-specific Stability and the K-Means income_cv feature therefore stay
+    # unavailable instead of deriving income variability from account inflows.
+    income_std = None
+    income_cv = None
+    stability_available = False
 
     overspending_basis = (
         complete_months if not complete_months.empty else monthly_summary
@@ -349,7 +358,9 @@ def _behavioral_features(
     )
 
     trends = _trend_features(complete_months)
-    trend_available = all(trends[column] is not None for column in TREND_COLUMNS)
+    trend_available = all(
+        trends[column] is not None for column in DEBIT_TREND_COLUMNS
+    )
     expense_ratio = total_debit / denominator
     surplus = monthly_amount - (total_debit / normalization_months)
     surplus_ratio = 1.0 - expense_ratio
@@ -375,6 +386,7 @@ def _behavioral_features(
         "overspending_month_ratio": overspending_ratio,
         "income_std": income_std,
         "income_cv": income_cv,
+        "income_cv_source": "unavailable_bank_credits_not_used_as_income_history",
         "expense_ratio_volatility": expense_volatility,
         "desire_volatility": desire_volatility,
         "repayment_volatility": repayment_volatility,
@@ -461,8 +473,8 @@ def _score_upload(
                 None
                 if stability_available
                 else (
-                    "Requires at least two complete calendar months with "
-                    "positive observed Income credits."
+                    "Unavailable for uploaded statements because bank credits "
+                    "are not treated as reliable recurring income history."
                 )
             ),
         },
@@ -499,15 +511,21 @@ def _analytical_quality(
     stability_available: bool,
     trend_available: bool,
     original_transaction_count: int,
+    included_transaction_count: int,
     excluded_transaction_count: int,
 ) -> dict[str, Any]:
     warnings = []
     if len(transactions) < 30:
-        warnings.append("Fewer than 30 transactions are available.")
+        warnings.append(
+            "Fewer than 30 included debit transactions are available for analysis."
+        )
     if coverage_days < 30:
         warnings.append("Statement coverage is shorter than 30 days.")
     if not stability_available:
-        warnings.append("The Stability component is unavailable from this history.")
+        warnings.append(
+            "The Stability component is unavailable because statement credits "
+            "are not treated as recurring income history."
+        )
     if not trend_available:
         warnings.append("Three-month trend claims are unavailable.")
 
@@ -533,7 +551,8 @@ def _analytical_quality(
         "analytical_confidence": confidence,
         "transaction_count": len(transactions),
         "original_reviewed_transaction_count": original_transaction_count,
-        "included_transaction_count": len(transactions),
+        "included_transaction_count": included_transaction_count,
+        "analyzed_debit_transaction_count": len(transactions),
         "excluded_transaction_count": excluded_transaction_count,
         "coverage_days": coverage_days,
         "represented_months": int(
@@ -561,10 +580,11 @@ def analyze_reviewed_transactions(
     """Build upload-specific features and legacy rule outputs entirely in memory."""
 
     (
+        statement_transactions,
         transactions,
         monthly_amount,
         budget,
-        original_transaction_count,
+        included_transaction_count,
         excluded_transaction_count,
     ) = _validate_inputs(
         reviewed_transactions,
@@ -596,7 +616,8 @@ def analyze_reviewed_transactions(
         complete_month_count,
         stability_available,
         trend_available,
-        original_transaction_count,
+        len(statement_transactions),
+        included_transaction_count,
         excluded_transaction_count,
     )
 
@@ -616,10 +637,36 @@ def analyze_reviewed_transactions(
         }
 
     total_debit = float(transactions.loc[debit_rows, "amount"].sum())
-    total_credit = float(transactions.loc[credit_rows, "amount"].sum())
-    observed_income = category_summary["Income"]["total"]
     monthly_debit = total_debit / normalization_months
-    monthly_credit = total_credit / normalization_months
+
+    statement_debit_rows = statement_transactions["transaction_type"] == "debit"
+    statement_credit_rows = statement_transactions["transaction_type"] == "credit"
+    observed_debits = float(
+        statement_transactions.loc[statement_debit_rows, "amount"].sum()
+    )
+    observed_credits = float(
+        statement_transactions.loc[statement_credit_rows, "amount"].sum()
+    )
+    statement_start = statement_transactions["date"].min()
+    statement_end = statement_transactions["date"].max()
+    statement_coverage_days = int((statement_end - statement_start).days + 1)
+    statement_coverage = _period_coverage(statement_start, statement_end)
+    statement_month_equivalents = max(
+        1.0, float(statement_coverage["coverage_fraction"].sum())
+    )
+    included_credit_rows = (
+        statement_credit_rows & statement_transactions["include_in_analysis"]
+    )
+    included_credits = float(
+        statement_transactions.loc[included_credit_rows, "amount"].sum()
+    )
+    categorized_credit_inflows = float(
+        statement_transactions.loc[
+            included_credit_rows
+            & (statement_transactions["final_category"] == "Income"),
+            "amount",
+        ].sum()
+    )
 
     budget_summary = None
     if budget is not None:
@@ -637,8 +684,9 @@ def analyze_reviewed_transactions(
         "end_date": end_date.date().isoformat(),
         "coverage_days": coverage_days,
         "transaction_count": len(transactions),
-        "original_reviewed_transaction_count": original_transaction_count,
-        "included_transaction_count": len(transactions),
+        "original_reviewed_transaction_count": len(statement_transactions),
+        "included_transaction_count": included_transaction_count,
+        "analyzed_debit_transaction_count": len(transactions),
         "excluded_transaction_count": excluded_transaction_count,
         "covered_calendar_months": monthly_summary["month"].tolist(),
         "covered_calendar_month_count": len(monthly_summary),
@@ -651,13 +699,14 @@ def analyze_reviewed_transactions(
         "covered_month_equivalents": round(covered_month_equivalents, 4),
         "normalization_months": round(normalization_months, 4),
         "normalization_method": (
-            "Sum observed-days/days-in-calendar-month across the statement. "
+            "Sum observed-days/days-in-calendar-month across the included debit "
+            "analytical history. "
             "Use a one-month floor for histories shorter than one month to avoid "
             "extrapolating partial-period spending upward."
         ),
         "coverage_boundary_assumption": (
-            "Coverage starts at the earliest transaction date and ends at the "
-            "latest transaction date because statement-period metadata is unavailable."
+            "Behavioral coverage starts at the earliest included debit and ends at "
+            "the latest included debit because statement-period metadata is unavailable."
         ),
         "monthly_available_amount": round(monthly_amount, 2),
         "total_debit_spending": round(total_debit, 2),
@@ -665,14 +714,32 @@ def analyze_reviewed_transactions(
         "remaining_amount_estimate": round(monthly_amount - monthly_debit, 2),
     }
     observed_income_summary = {
-        "observed_income_credits": round(float(observed_income), 2),
+        "observed_income_credits": round(categorized_credit_inflows, 2),
         "monthly_normalized_observed_income": round(
-            float(observed_income) / normalization_months, 2
+            categorized_credit_inflows / statement_month_equivalents, 2
         ),
-        "total_credit_inflow": round(total_credit, 2),
-        "monthly_normalized_credit_inflow": round(monthly_credit, 2),
+        "total_credit_inflow": round(included_credits, 2),
+        "monthly_normalized_credit_inflow": round(
+            included_credits / statement_month_equivalents, 2
+        ),
         "monthly_reference_amount": round(monthly_amount, 2),
         "reference_amount_was_replaced_by_credits": False,
+        "used_for_behavioral_features": False,
+    }
+    statement_cash_flow_summary = {
+        "observed_credits": round(observed_credits, 2),
+        "observed_debits": round(observed_debits, 2),
+        "net_statement_cash_flow": round(observed_credits - observed_debits, 2),
+        "spending_considered_for_analysis": round(total_debit, 2),
+        "statement_transaction_count": len(statement_transactions),
+        "statement_start_date": statement_start.date().isoformat(),
+        "statement_end_date": statement_end.date().isoformat(),
+        "statement_coverage_days": statement_coverage_days,
+        "scope": (
+            "Observed credits, debits, and net cash flow use the full reviewed "
+            "statement before behavioral exclusions. Spending considered for "
+            "analysis uses included debit transactions only."
+        ),
     }
 
     score_result = _score_upload(
@@ -695,5 +762,6 @@ def analyze_reviewed_transactions(
         data_quality=data_quality,
         budget_summary=budget_summary,
         observed_income_summary=observed_income_summary,
+        statement_cash_flow_summary=statement_cash_flow_summary,
         monthly_summary=monthly_summary,
     )
