@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Hashable, Mapping
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -52,10 +53,11 @@ def initialize_review_categories(
     *,
     overwrite: bool = False,
 ) -> pd.DataFrame:
-    """Add ``final_category`` initialized from ``predicted_category``.
+    """Initialize category review and behavioral-analysis inclusion fields.
 
     Existing valid final categories are preserved unless ``overwrite`` is
-    explicitly requested. This makes the helper safe on normal UI reruns.
+    explicitly requested. Existing session frames without
+    ``include_in_analysis`` safely default to ``True``.
     """
 
     source = _require_dataframe(df)
@@ -64,6 +66,10 @@ def initialize_review_categories(
     if result.empty:
         if "final_category" not in result.columns:
             result["final_category"] = pd.Series(dtype="string", index=result.index)
+        if "include_in_analysis" not in result.columns:
+            result["include_in_analysis"] = pd.Series(
+                dtype="bool", index=result.index
+            )
         return result
 
     if "predicted_category" not in result.columns:
@@ -78,9 +84,12 @@ def initialize_review_categories(
 
     if "final_category" in result.columns and not overwrite:
         validate_final_categories(result)
-        return result
+    else:
+        result["final_category"] = result["predicted_category"].astype("string")
 
-    result["final_category"] = result["predicted_category"].astype("string")
+    if overwrite or "include_in_analysis" not in result.columns:
+        result["include_in_analysis"] = True
+    validate_include_in_analysis(result)
     return result
 
 
@@ -103,6 +112,95 @@ def validate_final_categories(df: pd.DataFrame | None) -> bool:
     return True
 
 
+def validate_include_in_analysis(df: pd.DataFrame | None) -> bool:
+    """Require one explicit boolean inclusion decision for every row."""
+
+    transactions = _require_dataframe(df)
+    if transactions.empty:
+        return True
+    if "include_in_analysis" not in transactions.columns:
+        raise ValueError("include_in_analysis is required before review confirmation")
+    invalid = [
+        value
+        for value in transactions["include_in_analysis"].tolist()
+        if not isinstance(value, (bool, np.bool_))
+    ]
+    if invalid:
+        raise ValueError(
+            "include_in_analysis must contain only True or False values"
+        )
+    return True
+
+
+def validate_review_fields(df: pd.DataFrame | None) -> bool:
+    """Validate both editable review decisions."""
+
+    validate_final_categories(df)
+    validate_include_in_analysis(df)
+    return True
+
+
+def apply_review_edits(
+    df: pd.DataFrame | None,
+    edits: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Merge filtered editor changes without dropping or mutating predictions."""
+
+    result = initialize_review_categories(df)
+    if edits is None or len(edits) == 0:
+        return result
+    if not isinstance(edits, pd.DataFrame):
+        raise TypeError("review edits must be a pandas DataFrame or None")
+    if not result.index.is_unique or not edits.index.is_unique:
+        raise ValueError("Transaction and edit indices must be unique")
+
+    editable = [
+        column
+        for column in ("final_category", "include_in_analysis")
+        if column in edits.columns
+    ]
+    if not editable:
+        raise ValueError(
+            "Edited DataFrame must contain final_category or include_in_analysis"
+        )
+    unknown_indices = [index for index in edits.index if index not in result.index]
+    if unknown_indices:
+        raise KeyError(f"Edit indices are not present in transactions: {unknown_indices}")
+
+    if "final_category" in editable:
+        invalid = _invalid_categories(edits["final_category"])
+        if invalid:
+            allowed = ", ".join(FINPULSE_CATEGORIES)
+            invalid_text = ", ".join(repr(value) for value in invalid)
+            raise ValueError(
+                f"Invalid manual category value(s): {invalid_text}. "
+                f"Allowed values: {allowed}"
+            )
+    if "include_in_analysis" in editable:
+        invalid_inclusion = [
+            value
+            for value in edits["include_in_analysis"].tolist()
+            if not isinstance(value, (bool, np.bool_))
+        ]
+        if invalid_inclusion:
+            raise ValueError(
+                "include_in_analysis edits must contain only True or False"
+            )
+
+    original_predictions = result["predicted_category"].copy()
+    original_row_count = len(result)
+    for column in editable:
+        for index, value in edits[column].items():
+            result.at[index, column] = bool(value) if column == "include_in_analysis" else value
+
+    validate_review_fields(result)
+    if len(result) != original_row_count:
+        raise RuntimeError("Review edits unexpectedly changed transaction row count")
+    if not result["predicted_category"].equals(original_predictions):
+        raise RuntimeError("Review edits must not change predicted_category")
+    return result
+
+
 def apply_category_edits(
     df: pd.DataFrame | None,
     edits: Mapping[Hashable, str] | pd.DataFrame | None,
@@ -123,9 +221,7 @@ def apply_category_edits(
     if isinstance(edits, pd.DataFrame):
         if "final_category" not in edits.columns:
             raise ValueError("Edited DataFrame must contain final_category")
-        if not edits.index.is_unique:
-            raise ValueError("Edited DataFrame index must be unique")
-        edit_map: Mapping[Hashable, Any] = edits["final_category"].to_dict()
+        return apply_review_edits(result, edits[["final_category"]])
     elif isinstance(edits, Mapping):
         edit_map = edits
     else:

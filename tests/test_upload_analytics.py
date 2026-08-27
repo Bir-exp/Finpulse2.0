@@ -15,6 +15,7 @@ def transaction(
     *,
     predicted_category=None,
     confidence="High",
+    include_in_analysis=True,
 ):
     return {
         "date": date,
@@ -30,6 +31,7 @@ def transaction(
         "predicted_category": predicted_category or final_category,
         "confidence": confidence,
         "final_category": final_category,
+        "include_in_analysis": include_in_analysis,
     }
 
 
@@ -58,6 +60,130 @@ def repeated_full_months(month_count=6):
 
 
 class UploadAnalyticsTests(unittest.TestCase):
+    def test_excluded_debit_does_not_count_toward_spending(self):
+        rows = [
+            transaction("2024-01-01", 1000, "debit", "Essentials"),
+            transaction(
+                "2024-01-31",
+                20000,
+                "debit",
+                "Others",
+                include_in_analysis=False,
+            ),
+        ]
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        self.assertEqual(result.statement_summary["total_debit_spending"], 1000)
+        self.assertEqual(result.statement_summary["original_reviewed_transaction_count"], 2)
+        self.assertEqual(result.statement_summary["included_transaction_count"], 1)
+        self.assertEqual(result.statement_summary["excluded_transaction_count"], 1)
+
+    def test_excluded_desire_does_not_affect_ratio(self):
+        rows = [
+            transaction("2024-01-01", 500, "debit", "Desire"),
+            transaction(
+                "2024-01-31",
+                20000,
+                "debit",
+                "Desire",
+                include_in_analysis=False,
+            ),
+        ]
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        self.assertEqual(result.behavioral_features["avg_desire_ratio"], 0.1)
+
+    def test_excluded_repayment_does_not_affect_ratio(self):
+        rows = [
+            transaction("2024-01-01", 250, "debit", "Repayment"),
+            transaction(
+                "2024-01-31",
+                20000,
+                "debit",
+                "Repayment",
+                include_in_analysis=False,
+            ),
+        ]
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        self.assertEqual(result.behavioral_features["avg_repayment_ratio"], 0.05)
+
+    def test_excluded_investment_does_not_affect_ratio(self):
+        rows = [
+            transaction("2024-01-01", 500, "debit", "Investment/Savings"),
+            transaction(
+                "2024-01-31",
+                20000,
+                "debit",
+                "Investment/Savings",
+                include_in_analysis=False,
+            ),
+        ]
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        self.assertEqual(result.behavioral_features["avg_investment_ratio"], 0.1)
+
+    def test_excluded_credit_does_not_affect_income_or_stability(self):
+        rows = [
+            transaction("2024-01-01", 5000, "credit", "Income"),
+            transaction(
+                "2024-01-15",
+                20000,
+                "credit",
+                "Income",
+                include_in_analysis=False,
+            ),
+            transaction("2024-01-31", 100, "debit", "Essentials"),
+            transaction("2024-02-01", 5000, "credit", "Income"),
+            transaction("2024-02-29", 100, "debit", "Essentials"),
+        ]
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        self.assertEqual(result.observed_income_summary["observed_income_credits"], 10000)
+        self.assertEqual(result.observed_income_summary["total_credit_inflow"], 10000)
+        self.assertEqual(result.behavioral_features["income_cv"], 0.0)
+
+    def test_explicitly_included_rows_match_legacy_behavior(self):
+        included = pd.DataFrame(normal_month_rows())
+        legacy = included.drop(columns="include_in_analysis")
+        included_result = analyze_reviewed_transactions(included, 5000)
+        legacy_result = analyze_reviewed_transactions(legacy, 5000)
+        self.assertEqual(included_result.category_summary, legacy_result.category_summary)
+        self.assertEqual(
+            included_result.behavioral_features,
+            legacy_result.behavioral_features,
+        )
+
+    def test_confidence_uses_included_transaction_count(self):
+        rows = []
+        for position in range(20):
+            date = pd.Timestamp("2024-01-01") + pd.Timedelta(
+                days=round(position * 30 / 19)
+            )
+            rows.append(transaction(date, 10, "debit", "Essentials"))
+            rows.append(
+                transaction(
+                    date,
+                    10,
+                    "debit",
+                    "Others",
+                    include_in_analysis=False,
+                )
+            )
+        result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+        self.assertEqual(result.data_quality["original_reviewed_transaction_count"], 40)
+        self.assertEqual(result.data_quality["included_transaction_count"], 20)
+        self.assertEqual(result.data_quality["analytical_confidence"], "Low")
+        self.assertFalse(result.data_quality["minimum_transaction_guidance_met"])
+
+    def test_excluding_every_transaction_fails_clearly(self):
+        rows = [
+            transaction(
+                "2024-01-01",
+                100,
+                "debit",
+                "Essentials",
+                include_in_analysis=False,
+            )
+        ]
+        with self.assertRaisesRegex(ValueError, "No transactions are included"):
+            analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
+
     def test_one_month_statement(self):
         result = analyze_reviewed_transactions(
             pd.DataFrame(normal_month_rows()),

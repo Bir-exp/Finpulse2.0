@@ -24,7 +24,11 @@ from scripts.score_engine import (
 )
 from scripts.signal_engine import generate_signals
 
-from .review import FINPULSE_CATEGORIES, validate_final_categories
+from .review import (
+    FINPULSE_CATEGORIES,
+    validate_final_categories,
+    validate_include_in_analysis,
+)
 
 
 CATEGORY_AMOUNT_COLUMNS = {
@@ -72,7 +76,7 @@ def _validate_inputs(
     transactions: pd.DataFrame,
     monthly_available_amount: object,
     monthly_budget: object,
-) -> tuple[pd.DataFrame, float, float | None]:
+) -> tuple[pd.DataFrame, float, float | None, int, int]:
     if not isinstance(transactions, pd.DataFrame):
         raise TypeError("reviewed_transactions must be a pandas DataFrame")
     if transactions.empty:
@@ -85,9 +89,21 @@ def _validate_inputs(
             "reviewed_transactions is missing required columns: "
             + ", ".join(sorted(missing))
         )
-    validate_final_categories(transactions)
-
     prepared = transactions.copy()
+    if "include_in_analysis" not in prepared.columns:
+        prepared["include_in_analysis"] = True
+    validate_final_categories(prepared)
+    validate_include_in_analysis(prepared)
+
+    original_transaction_count = len(prepared)
+    prepared = prepared.loc[prepared["include_in_analysis"]].copy()
+    excluded_transaction_count = original_transaction_count - len(prepared)
+    if prepared.empty:
+        raise ValueError(
+            "No transactions are included in FinPulse analysis. Include at least "
+            "one transaction before generating the report."
+        )
+
     prepared["date"] = pd.to_datetime(prepared["date"], errors="coerce")
     if prepared["date"].isna().any():
         raise ValueError("reviewed_transactions contains invalid dates")
@@ -114,7 +130,13 @@ def _validate_inputs(
         budget = None
     else:
         budget = _positive_number(monthly_budget, "monthly_budget")
-    return prepared.sort_values("date").copy(), monthly_amount, budget
+    return (
+        prepared.sort_values("date").copy(),
+        monthly_amount,
+        budget,
+        original_transaction_count,
+        excluded_transaction_count,
+    )
 
 
 def _period_coverage(
@@ -476,6 +498,8 @@ def _analytical_quality(
     complete_months: int,
     stability_available: bool,
     trend_available: bool,
+    original_transaction_count: int,
+    excluded_transaction_count: int,
 ) -> dict[str, Any]:
     warnings = []
     if len(transactions) < 30:
@@ -508,6 +532,9 @@ def _analytical_quality(
     return {
         "analytical_confidence": confidence,
         "transaction_count": len(transactions),
+        "original_reviewed_transaction_count": original_transaction_count,
+        "included_transaction_count": len(transactions),
+        "excluded_transaction_count": excluded_transaction_count,
         "coverage_days": coverage_days,
         "represented_months": int(
             transactions["date"].dt.to_period("M").nunique()
@@ -533,7 +560,13 @@ def analyze_reviewed_transactions(
 ) -> UploadAnalyticsResult:
     """Build upload-specific features and legacy rule outputs entirely in memory."""
 
-    transactions, monthly_amount, budget = _validate_inputs(
+    (
+        transactions,
+        monthly_amount,
+        budget,
+        original_transaction_count,
+        excluded_transaction_count,
+    ) = _validate_inputs(
         reviewed_transactions,
         monthly_available_amount,
         monthly_budget,
@@ -563,6 +596,8 @@ def analyze_reviewed_transactions(
         complete_month_count,
         stability_available,
         trend_available,
+        original_transaction_count,
+        excluded_transaction_count,
     )
 
     debit_rows = transactions["transaction_type"] == "debit"
@@ -602,6 +637,9 @@ def analyze_reviewed_transactions(
         "end_date": end_date.date().isoformat(),
         "coverage_days": coverage_days,
         "transaction_count": len(transactions),
+        "original_reviewed_transaction_count": original_transaction_count,
+        "included_transaction_count": len(transactions),
+        "excluded_transaction_count": excluded_transaction_count,
         "covered_calendar_months": monthly_summary["month"].tolist(),
         "covered_calendar_month_count": len(monthly_summary),
         "transaction_month_count": int(

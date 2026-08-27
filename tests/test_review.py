@@ -5,9 +5,11 @@ import pandas as pd
 from finpulse.review import (
     FINPULSE_CATEGORIES,
     apply_category_edits,
+    apply_review_edits,
     filter_review_transactions,
     initialize_review_categories,
     validate_final_categories,
+    validate_include_in_analysis,
 )
 
 
@@ -29,6 +31,45 @@ def sample_transactions():
 
 
 class ReviewTests(unittest.TestCase):
+    def test_new_rows_default_to_included_in_analysis(self):
+        result = initialize_review_categories(sample_transactions())
+        self.assertTrue(result["include_in_analysis"].all())
+        self.assertTrue(validate_include_in_analysis(result))
+
+    def test_excluding_transaction_preserves_row(self):
+        source = initialize_review_categories(sample_transactions())
+        edits = source.loc[[0], ["final_category", "include_in_analysis"]].copy()
+        edits.loc[0, "include_in_analysis"] = False
+        result = apply_review_edits(source, edits)
+        self.assertEqual(len(result), len(source))
+        self.assertFalse(bool(result.loc[0, "include_in_analysis"]))
+        self.assertEqual(result.loc[0, "description"], "SWIGGY")
+
+    def test_category_and_inclusion_edits_are_independent(self):
+        source = initialize_review_categories(sample_transactions())
+        edits = source.loc[[0], ["final_category", "include_in_analysis"]].copy()
+        edits.loc[0, "final_category"] = "Essentials"
+        edits.loc[0, "include_in_analysis"] = False
+        result = apply_review_edits(source, edits)
+        self.assertEqual(result.loc[0, "final_category"], "Essentials")
+        self.assertFalse(bool(result.loc[0, "include_in_analysis"]))
+
+    def test_review_edits_preserve_predicted_category(self):
+        source = initialize_review_categories(sample_transactions())
+        predictions = source["predicted_category"].copy()
+        edits = source.loc[[0], ["final_category", "include_in_analysis"]].copy()
+        edits.loc[0, "final_category"] = "Essentials"
+        edits.loc[0, "include_in_analysis"] = False
+        result = apply_review_edits(source, edits)
+        self.assertTrue(result["predicted_category"].equals(predictions))
+
+    def test_legacy_review_frame_defaults_inclusion_to_true(self):
+        legacy = initialize_review_categories(sample_transactions()).drop(
+            columns="include_in_analysis"
+        )
+        result = initialize_review_categories(legacy)
+        self.assertTrue(result["include_in_analysis"].all())
+
     def test_final_category_initializes_from_prediction(self):
         result = initialize_review_categories(sample_transactions())
         self.assertEqual(

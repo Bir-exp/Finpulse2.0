@@ -166,6 +166,7 @@ class IngestionDiagnostics:
     missing_required_fields: tuple[str, ...]
     ambiguous_mappings: dict[str, tuple[str, ...]]
     candidate_columns: dict[str, tuple[str, ...]]
+    source_columns: tuple[str, ...]
     date_range: tuple[str | None, str | None]
     debit_transactions: int
     credit_transactions: int
@@ -307,6 +308,77 @@ def _manual_mapping_result(
     )
 
 
+def build_manual_column_mapping(
+    source_columns: Iterable[object],
+    *,
+    date: str,
+    description: str,
+    debit: str | None = None,
+    credit: str | None = None,
+    amount: str | None = None,
+    transaction_type: str | None = None,
+    transaction_id: str | None = None,
+    balance: str | None = None,
+) -> dict[str, str]:
+    """Validate a user's explicit source-column selections.
+
+    The amount layout must be either separate debit/credit columns (at least
+    one direction may be present) or one amount column plus a direction column.
+    """
+
+    selected = {
+        field: str(value)
+        for field, value in {
+            "date": date,
+            "description": description,
+            "debit": debit,
+            "credit": credit,
+            "amount": amount,
+            "transaction_type": transaction_type,
+            "transaction_id": transaction_id,
+            "balance": balance,
+        }.items()
+        if value is not None and str(value).strip()
+    }
+    available = {str(column) for column in source_columns}
+    missing_sources = sorted(set(selected.values()) - available)
+    if missing_sources:
+        raise ValueError(
+            "Mapped source columns do not exist: " + ", ".join(missing_sources)
+        )
+    if "date" not in selected or "description" not in selected:
+        raise ValueError("Manual mapping requires date and description columns")
+
+    has_separate = "debit" in selected or "credit" in selected
+    has_combined = "amount" in selected or "transaction_type" in selected
+    if has_separate and has_combined:
+        raise ValueError(
+            "Choose either debit/credit columns or amount/transaction type, not both"
+        )
+    if not has_separate and not {
+        "amount",
+        "transaction_type",
+    }.issubset(selected):
+        raise ValueError(
+            "Manual mapping requires debit/credit or amount plus transaction type"
+        )
+    if has_combined and not {
+        "amount",
+        "transaction_type",
+    }.issubset(selected):
+        raise ValueError("Amount and transaction type must be mapped together")
+    if len(set(selected.values())) != len(selected):
+        raise ValueError("Each FinPulse field must map to a different source column")
+
+    mapping_result = _manual_mapping_result(source_columns, selected)
+    if not mapping_result.is_valid:
+        raise ValueError(
+            "Manual mapping is incomplete: "
+            + ", ".join(mapping_result.missing_required_fields)
+        )
+    return dict(mapping_result.mapping)
+
+
 def _is_blank_value(value: object) -> bool:
     if value is None or pd.isna(value):
         return True
@@ -401,6 +473,7 @@ def _diagnostics(
     transactions: pd.DataFrame,
     mapping_result: MappingResult,
     rejected_rows: pd.DataFrame,
+    source_columns: Iterable[object],
 ) -> IngestionDiagnostics:
     if transactions.empty:
         date_range: tuple[str | None, str | None] = (None, None)
@@ -427,6 +500,7 @@ def _diagnostics(
         missing_required_fields=mapping_result.missing_required_fields,
         ambiguous_mappings=dict(mapping_result.ambiguous_mappings),
         candidate_columns=dict(mapping_result.candidates),
+        source_columns=tuple(str(column) for column in source_columns),
         date_range=date_range,
         debit_transactions=debit_count,
         credit_transactions=credit_count,
@@ -469,7 +543,11 @@ def standardize_transactions(
         return IngestionResult(
             transactions=transactions,
             diagnostics=_diagnostics(
-                original_count, transactions, mapping_result, rejected_rows
+                original_count,
+                transactions,
+                mapping_result,
+                rejected_rows,
+                df.columns,
             ),
             mapping_result=mapping_result,
             rejected_rows=rejected_rows,
@@ -577,7 +655,11 @@ def standardize_transactions(
     return IngestionResult(
         transactions=transactions,
         diagnostics=_diagnostics(
-            original_count, transactions, mapping_result, rejected_rows
+            original_count,
+            transactions,
+            mapping_result,
+            rejected_rows,
+            df.columns,
         ),
         mapping_result=mapping_result,
         rejected_rows=rejected_rows,
@@ -631,8 +713,13 @@ def _read_csv(data: bytes) -> pd.DataFrame:
 def read_statement(
     file_or_path: str | Path | bytes | bytearray | BinaryIO,
     filename: str | None = None,
+    mapping: Mapping[str, str] | MappingResult | None = None,
 ) -> IngestionResult:
-    """Read a CSV/XLSX source and return standardized transactions."""
+    """Read a CSV/XLSX source and return standardized transactions.
+
+    ``mapping`` is an optional explicit FinPulse-field-to-source-column mapping
+    used after an automatic mapping is missing or ambiguous.
+    """
 
     data, source_name = _source_bytes(file_or_path, filename)
     suffix = Path(source_name).suffix.casefold()
@@ -658,4 +745,4 @@ def read_statement(
             f"Unable to read statement '{source_name}': {error}"
         ) from error
 
-    return standardize_transactions(frame)
+    return standardize_transactions(frame, mapping=mapping)
