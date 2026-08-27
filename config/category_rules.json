@@ -1,0 +1,285 @@
+{
+  "allowed_categories": [
+    "Income",
+    "Essentials",
+    "Desire",
+    "Repayment",
+    "Investment/Savings",
+    "Others"
+  ],
+  "fuzzy_threshold": 90,
+  "context_rules": [
+    {
+      "phrases": ["salary", "salary credit", "payroll", "monthly salary", "stipend", "pension credit"],
+      "transaction_types": ["credit"],
+      "detailed_category": "Salary",
+      "finpulse_category": "Income",
+      "confidence": "High"
+    },
+    {
+      "phrases": ["refund", "refund received", "reversal", "reversed transaction"],
+      "transaction_types": ["credit"],
+      "detailed_category": "Refund",
+      "finpulse_category": "Income",
+      "confidence": "High"
+    },
+    {
+      "phrases": ["credit card payment", "card payment due", "credit card bill", "cc payment"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Credit Card Payment",
+      "finpulse_category": "Repayment",
+      "confidence": "High"
+    },
+    {
+      "phrases": ["loan emi", "emi payment", "loan repayment", "loan instalment", "loan installment"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Loan EMI",
+      "finpulse_category": "Repayment",
+      "confidence": "High"
+    },
+    {
+      "phrases": ["mutual fund", "systematic investment plan", "sip investment", "groww sip", "zerodha sip"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Mutual Fund/SIP",
+      "finpulse_category": "Investment/Savings",
+      "confidence": "High"
+    },
+    {
+      "phrases": ["recurring deposit", "fixed deposit", "rd deposit", "fd deposit"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Recurring Deposit/Fixed Deposit",
+      "finpulse_category": "Investment/Savings",
+      "confidence": "High"
+    }
+  ],
+  "exact_merchants": [
+    {
+      "merchant": "Swiggy",
+      "aliases": ["swiggy", "swiggy limited"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Food Delivery",
+      "finpulse_category": "Desire",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Zomato",
+      "aliases": ["zomato", "zomato limited"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Food Delivery",
+      "finpulse_category": "Desire",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Blinkit",
+      "aliases": ["blinkit"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Groceries",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Zepto",
+      "aliases": ["zepto"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Groceries",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "merchant": "DMart",
+      "aliases": ["dmart", "d mart", "avenue supermarts"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Groceries",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "merchant": "BigBasket",
+      "aliases": ["bigbasket", "big basket"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Groceries",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Netflix",
+      "aliases": ["netflix"],
+      "transaction_types": ["debit"],
+      "detailed_category": "OTT/Subscriptions",
+      "finpulse_category": "Desire",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Spotify",
+      "aliases": ["spotify"],
+      "transaction_types": ["debit"],
+      "detailed_category": "OTT/Subscriptions",
+      "finpulse_category": "Desire",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Myntra",
+      "aliases": ["myntra"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Shopping/Fashion",
+      "finpulse_category": "Desire",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Ajio",
+      "aliases": ["ajio"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Shopping/Fashion",
+      "finpulse_category": "Desire",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Zerodha",
+      "aliases": ["zerodha", "zerodha broking"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Brokerage/Investment",
+      "finpulse_category": "Investment/Savings",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Groww",
+      "aliases": ["groww", "groww invest tech"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Brokerage/Investment",
+      "finpulse_category": "Investment/Savings",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Apollo Pharmacy",
+      "aliases": ["apollo pharmacy", "apollo pharmacies"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Healthcare",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "merchant": "Amazon",
+      "aliases": ["amazon", "amazon pay"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Unclassified Marketplace",
+      "finpulse_category": "Others",
+      "confidence": "Low",
+      "ambiguous": true
+    },
+    {
+      "merchant": "Flipkart",
+      "aliases": ["flipkart"],
+      "transaction_types": ["debit"],
+      "detailed_category": "Unclassified Marketplace",
+      "finpulse_category": "Others",
+      "confidence": "Low",
+      "ambiguous": true
+    }
+  ],
+  "strong_phrases": [
+    {
+      "phrases": ["medical store", "chemist shop"],
+      "detailed_category": "Healthcare",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "phrases": ["indian oil", "bharat petroleum", "hindustan petroleum"],
+      "detailed_category": "Transport/Fuel",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "phrases": ["campus canteen", "college canteen", "office canteen"],
+      "detailed_category": "Food/Canteen",
+      "finpulse_category": "Essentials",
+      "confidence": "Medium"
+    },
+    {
+      "phrases": ["food delivery", "online food order"],
+      "detailed_category": "Food Delivery",
+      "finpulse_category": "Desire",
+      "confidence": "High"
+    },
+    {
+      "phrases": ["movie tickets", "cinema tickets"],
+      "detailed_category": "Entertainment",
+      "finpulse_category": "Desire",
+      "confidence": "High"
+    }
+  ],
+  "generic_keywords": [
+    {
+      "keywords": ["grocery", "groceries", "kirana"],
+      "detailed_category": "Groceries",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "keywords": ["stationery", "stationers"],
+      "detailed_category": "Education/Stationery",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "keywords": ["pharmacy", "pharmacies", "hospital", "clinic", "medical"],
+      "detailed_category": "Healthcare",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "keywords": ["petrol", "fuel", "hpcl", "iocl"],
+      "detailed_category": "Transport/Fuel",
+      "finpulse_category": "Essentials",
+      "confidence": "Medium"
+    },
+    {
+      "keywords": ["rent", "house rent"],
+      "detailed_category": "Rent",
+      "finpulse_category": "Essentials",
+      "confidence": "High"
+    },
+    {
+      "keywords": ["electricity", "water bill", "gas bill", "utility", "broadband"],
+      "detailed_category": "Utilities",
+      "finpulse_category": "Essentials",
+      "confidence": "Medium"
+    },
+    {
+      "keywords": ["school", "college", "tuition", "education"],
+      "detailed_category": "Education/Stationery",
+      "finpulse_category": "Essentials",
+      "confidence": "Medium"
+    },
+    {
+      "keywords": ["barber", "salon", "spa"],
+      "detailed_category": "Personal Care",
+      "finpulse_category": "Desire",
+      "confidence": "Medium"
+    },
+    {
+      "keywords": ["restaurant", "cafe", "café", "bistro", "dhaba"],
+      "detailed_category": "Restaurant/Cafe",
+      "finpulse_category": "Desire",
+      "confidence": "Medium"
+    },
+    {
+      "keywords": ["cinema", "movie", "multiplex", "entertainment"],
+      "detailed_category": "Entertainment",
+      "finpulse_category": "Desire",
+      "confidence": "Medium"
+    },
+    {
+      "keywords": ["subscription", "ott"],
+      "detailed_category": "OTT/Subscriptions",
+      "finpulse_category": "Desire",
+      "confidence": "Medium"
+    },
+    {
+      "keywords": ["fashion", "clothing", "apparel"],
+      "detailed_category": "Shopping/Fashion",
+      "finpulse_category": "Desire",
+      "confidence": "Medium"
+    }
+  ]
+}
