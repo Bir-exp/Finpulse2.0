@@ -1,0 +1,332 @@
+{
+  "version": 1,
+  "privacy_notice": "All names, identifiers, handles, balances, and transactions are deterministic synthetic test data. No real user statement data is included.",
+  "preferred_demo": {
+    "filename": "student_1month.xlsx",
+    "monthly_available_amount": 5000,
+    "monthly_budget": 4500,
+    "manual_corrections": [
+      {
+        "transaction_id": "STU-AMAZON",
+        "final_category": "Essentials",
+        "rationale": "Demo assumption: household study supplies"
+      }
+    ],
+    "exclusions": [
+      "STU-TEMP-CREDIT",
+      "STU-TEMP-DEBIT"
+    ],
+    "expected_results": {
+      "spending_considered_for_analysis": 7273,
+      "category_totals": {
+        "Income": 0,
+        "Essentials": 3975,
+        "Desire": 2488,
+        "Repayment": 0,
+        "Investment/Savings": 0,
+        "Others": 810
+      },
+      "expense_ratio": 1.4546,
+      "budget_utilization": 1.6162,
+      "budget_utilization_percent": 161.62
+    }
+  },
+  "fixtures": [
+    {
+      "filename": "student_1month.xlsx",
+      "scenario": "Student / pocket-money user with temporary parent transfer",
+      "monthly_available_amount": 5000,
+      "monthly_budget": 4500,
+      "expected_source_row_count": 33,
+      "expected_cleaned_row_count": 33,
+      "expected_approx_transaction_count": 33,
+      "expected_date_range": [
+        "2026-01-01",
+        "2026-01-31"
+      ],
+      "expected_column_mapping": {
+        "date": "Date",
+        "transaction_id": "transactionId",
+        "debit": "withdraw",
+        "credit": "deposits",
+        "balance": "balance",
+        "description": "remarks"
+      },
+      "expected_amount_layout": "separate_debit_credit",
+      "exceptional_transactions": [
+        {
+          "transaction_id": "STU-TEMP-CREDIT",
+          "role": "temporary_credit",
+          "intended_exclusion": true
+        },
+        {
+          "transaction_id": "STU-TEMP-DEBIT",
+          "role": "matching_parent_behalf_debit",
+          "intended_exclusion": true
+        }
+      ],
+      "category_expectations": [
+        {
+          "transaction_id": "STU-0003",
+          "predicted_category": "Essentials",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "STU-0005",
+          "predicted_category": "Desire",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "STU-0006",
+          "predicted_category": "Others",
+          "confidence": "Low"
+        },
+        {
+          "transaction_id": "STU-AMAZON",
+          "predicted_category": "Others",
+          "confidence": "Low"
+        }
+      ],
+      "low_confidence_expected": true,
+      "manual_mapping_required": false,
+      "expected_dropped_row_reasons": {},
+      "notes": "Preferred demo. Exact real-statement schema; temporary pair should be excluded manually."
+    },
+    {
+      "filename": "salaried_3months.xlsx",
+      "scenario": "Salaried user across three complete calendar months",
+      "monthly_available_amount": 72000,
+      "monthly_budget": 60000,
+      "expected_source_row_count": 75,
+      "expected_cleaned_row_count": 75,
+      "expected_approx_transaction_count": 75,
+      "expected_date_range": [
+        "2026-01-01",
+        "2026-03-31"
+      ],
+      "expected_column_mapping": {
+        "date": "Date",
+        "transaction_id": "transactionId",
+        "debit": "withdraw",
+        "credit": "deposits",
+        "balance": "balance",
+        "description": "remarks"
+      },
+      "expected_amount_layout": "separate_debit_credit",
+      "exceptional_transactions": [],
+      "category_expectations": [
+        {
+          "transaction_id": "SAL-202601-01",
+          "predicted_category": "Income",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "SAL-202601-13",
+          "predicted_category": "Repayment",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "SAL-202601-15",
+          "predicted_category": "Investment/Savings",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "SAL-202601-11",
+          "predicted_category": "Others",
+          "confidence": "Low"
+        }
+      ],
+      "low_confidence_expected": true,
+      "manual_mapping_required": false,
+      "expected_dropped_row_reasons": {},
+      "notes": "Includes salary-like credits, recurring costs, debt, investments, local merchants, and ambiguous marketplaces."
+    },
+    {
+      "filename": "household_3months.csv",
+      "scenario": "Non-salaried household with irregular credits and controlled dirty rows",
+      "monthly_available_amount": 32000,
+      "monthly_budget": null,
+      "expected_source_row_count": 35,
+      "expected_cleaned_row_count": 32,
+      "expected_approx_transaction_count": 32,
+      "expected_date_range": [
+        "2026-07-01",
+        "2026-09-30"
+      ],
+      "expected_column_mapping": {
+        "date": "Date",
+        "debit": "withdraw",
+        "credit": "deposits",
+        "description": "remarks"
+      },
+      "expected_amount_layout": "separate_debit_credit",
+      "exceptional_transactions": [],
+      "category_expectations": [
+        {
+          "description": "SCHOOL STATIONERY",
+          "predicted_category": "Essentials"
+        },
+        {
+          "description": "RAJU BARBER",
+          "predicted_category": "Desire"
+        },
+        {
+          "description": "XYZ ENTERPRISES",
+          "predicted_category": "Others",
+          "confidence": "Low"
+        }
+      ],
+      "low_confidence_expected": true,
+      "manual_mapping_required": false,
+      "expected_dropped_row_reasons": {
+        "duplicate_header_row": 1,
+        "blank_row": 1,
+        "missing_amount_direction": 1
+      },
+      "notes": "No optional transaction ID or balance columns. Includes mixed dates, currency symbols, commas, a duplicate header, blank row, and zero value."
+    },
+    {
+      "filename": "mixed_6months.xlsx",
+      "scenario": "Six-month mixed user for normalization, trends, row volume, and exceptional cash flow",
+      "monthly_available_amount": 45000,
+      "monthly_budget": 40000,
+      "expected_source_row_count": 128,
+      "expected_cleaned_row_count": 128,
+      "expected_approx_transaction_count": 128,
+      "expected_date_range": [
+        "2026-01-01",
+        "2026-06-30"
+      ],
+      "expected_column_mapping": {
+        "date": "Transaction Date",
+        "transaction_id": "Txn ID",
+        "debit": "Debit Amount",
+        "credit": "Credit Amount",
+        "balance": "Available Balance",
+        "description": "Narration"
+      },
+      "expected_amount_layout": "separate_debit_credit",
+      "exceptional_transactions": [
+        {
+          "transaction_id": "MIX-TEMP-CREDIT",
+          "role": "temporary_credit",
+          "intended_exclusion": true
+        },
+        {
+          "transaction_id": "MIX-TEMP-DEBIT",
+          "role": "matching_exceptional_debit",
+          "intended_exclusion": true
+        }
+      ],
+      "category_expectations": [
+        {
+          "transaction_id": "MIX-202601-07",
+          "predicted_category": "Desire",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "MIX-202601-13",
+          "predicted_category": "Repayment",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "MIX-202601-14",
+          "predicted_category": "Investment/Savings",
+          "confidence": "High"
+        }
+      ],
+      "low_confidence_expected": true,
+      "manual_mapping_required": false,
+      "expected_dropped_row_reasons": {},
+      "notes": "Contains repeated-looking transaction IDs and six complete debit-covered months. Uploaded persona must remain unavailable."
+    },
+    {
+      "filename": "alternate_bank_format.csv",
+      "scenario": "Alternate bank alias schema",
+      "monthly_available_amount": 35000,
+      "monthly_budget": 30000,
+      "expected_source_row_count": 16,
+      "expected_cleaned_row_count": 16,
+      "expected_approx_transaction_count": 16,
+      "expected_date_range": [
+        "2026-05-01",
+        "2026-05-31"
+      ],
+      "expected_column_mapping": {
+        "date": "Txn Date",
+        "transaction_id": "Ref No",
+        "debit": "Withdrawal Amount",
+        "credit": "Deposit Amount",
+        "balance": "Closing Balance",
+        "description": "Narration"
+      },
+      "expected_amount_layout": "separate_debit_credit",
+      "exceptional_transactions": [],
+      "category_expectations": [
+        {
+          "transaction_id": "ALT-003",
+          "predicted_category": "Essentials",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "ALT-011",
+          "predicted_category": "Repayment",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "ALT-015",
+          "predicted_category": "Others",
+          "confidence": "Low"
+        }
+      ],
+      "low_confidence_expected": true,
+      "manual_mapping_required": false,
+      "expected_dropped_row_reasons": {},
+      "notes": "Exercises standard alternate bank aliases without manual mapping."
+    },
+    {
+      "filename": "amount_type_format.xlsx",
+      "scenario": "Single amount plus debit/credit indicator schema",
+      "monthly_available_amount": 45000,
+      "monthly_budget": null,
+      "expected_source_row_count": 18,
+      "expected_cleaned_row_count": 18,
+      "expected_approx_transaction_count": 18,
+      "expected_date_range": [
+        "2026-06-01",
+        "2026-06-30"
+      ],
+      "expected_column_mapping": {
+        "date": "transaction_date",
+        "transaction_id": "reference_number",
+        "balance": "balance",
+        "description": "description",
+        "amount": "amount",
+        "transaction_type": "transaction_type"
+      },
+      "expected_amount_layout": "amount_and_transaction_type",
+      "exceptional_transactions": [],
+      "category_expectations": [
+        {
+          "transaction_id": "AMT-001",
+          "predicted_category": "Income",
+          "confidence": "High"
+        },
+        {
+          "transaction_id": "AMT-010",
+          "predicted_category": "Others",
+          "confidence": "Low"
+        },
+        {
+          "transaction_id": "AMT-013",
+          "predicted_category": "Investment/Savings",
+          "confidence": "High"
+        }
+      ],
+      "low_confidence_expected": true,
+      "manual_mapping_required": false,
+      "expected_dropped_row_reasons": {},
+      "notes": "Cycles Debit, Credit, DR, and CR values through the amount/type ingestion layout."
+    }
+  ]
+}

@@ -39,6 +39,15 @@ class CategorizationTests(unittest.TestCase):
     def test_barber_is_personal_care(self):
         self.assert_category("RAJU BARBER", "debit", "Personal Care", "Desire")
 
+    def test_local_canteen_is_essential_with_medium_confidence(self):
+        self.assert_category(
+            "RAMESH CANTEEN",
+            "debit",
+            "Food/Canteen",
+            "Essentials",
+            "Medium",
+        )
+
     def test_apollo_pharmacy_is_healthcare(self):
         self.assert_category("APOLLO PHARMACY", "debit", "Healthcare", "Essentials", "High")
 
@@ -105,6 +114,13 @@ class CategorizationTests(unittest.TestCase):
         for description, expected in examples.items():
             with self.subTest(description=description):
                 self.assertEqual(extract_receiver(description), expected)
+
+    def test_upi_handle_only_receiver_keeps_human_identifier(self):
+        self.assertEqual(extract_receiver("UPI/ROHAN@YBL/445566"), "Rohan")
+        result = categorize_transaction("UPI/ROHAN@YBL/445566", "debit")
+        self.assertEqual(result["receiver"], "Rohan")
+        self.assertEqual(result["predicted_category"], "Others")
+        self.assertEqual(result["confidence"], "Low")
 
     def test_all_outputs_use_allowed_categories_and_preserve_row_count(self):
         frame = pd.DataFrame({

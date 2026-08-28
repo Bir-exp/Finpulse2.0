@@ -849,8 +849,9 @@ if isinstance(reviewed_transactions, pd.DataFrame) and not reviewed_transactions
     st.divider()
     st.subheader("Generate FinPulse Report")
     st.caption(
-        "The rule-based score is the primary explainable result. The frozen K-Means "
-        "segment appears only when the uploaded history is sufficient."
+        "The rule-based score is the primary explainable result. K-Means persona "
+        "inference remains unavailable for uploaded statements because bank credits "
+        "are not used to derive the required income-variability feature."
     )
     if st.button("Generate FinPulse Report", type="primary"):
         try:

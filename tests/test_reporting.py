@@ -247,16 +247,35 @@ class ReportingTests(unittest.TestCase):
         self.assertNotIn(REPORT_KEY, state)
         self.assertNotIn(ANALYTICS_KEY, state)
 
-    def test_income_is_not_in_debit_spending_chart_data(self):
+    def test_credit_income_is_not_counted_as_debit_spending(self):
         report = generate_financial_report(
             reviewed_frame(), 5000, review_confirmed=True
         )
-        self.assertNotIn(
-            "Income", report.debit_spending_breakdown["category"].tolist()
+        income_row = report.debit_spending_breakdown.set_index("category").loc[
+            "Income"
+        ]
+        self.assertEqual(income_row["total"], 0)
+        self.assertEqual(
+            report.analytics.statement_cash_flow_summary["observed_credits"],
+            5000,
         )
         self.assertTrue(
             (report.debit_spending_breakdown["cash_flow"] == "debit").all()
         )
+
+    def test_income_labelled_debit_remains_in_spending_reconciliation(self):
+        frame = reviewed_frame()
+        frame.loc[1, "final_category"] = "Income"
+        report = generate_financial_report(frame, 5000, review_confirmed=True)
+        self.assertEqual(
+            report.debit_spending_breakdown["total"].sum(),
+            report.analytics.statement_summary["total_debit_spending"],
+        )
+        income_row = report.debit_spending_breakdown.set_index("category").loc[
+            "Income"
+        ]
+        self.assertEqual(income_row["total"], 1000)
+        self.assertEqual(report.behavioral_ratios["Income-labelled debit"], 0.2)
 
     def test_six_category_breakdown_uses_final_categories(self):
         report = generate_financial_report(

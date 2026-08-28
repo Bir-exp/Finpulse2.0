@@ -190,7 +190,7 @@
       "confidence": "High"
     },
     {
-      "phrases": ["campus canteen", "college canteen", "office canteen"],
+      "phrases": ["campus canteen", "college canteen", "office canteen", "canteen"],
       "detailed_category": "Food/Canteen",
       "finpulse_category": "Essentials",
       "confidence": "Medium"

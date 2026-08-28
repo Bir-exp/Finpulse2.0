@@ -33,6 +33,7 @@ from .review import (
 
 
 CATEGORY_AMOUNT_COLUMNS = {
+    "Income": "income_category_debits",
     "Essentials": "essentials",
     "Desire": "desire",
     "Repayment": "repayment",
@@ -51,6 +52,24 @@ TREND_COLUMNS = (
 DEBIT_TREND_COLUMNS = tuple(
     column for column in TREND_COLUMNS if column != "income_change_3m"
 )
+
+
+def _upload_specific_language(text: str) -> str:
+    """Use the upload path's declared-capacity terminology in legacy copy."""
+
+    replacements = (
+        ("your observed income", "your Monthly Available Amount"),
+        ("your monthly income", "your Monthly Available Amount"),
+        ("your income", "your Monthly Available Amount"),
+        ("income and outflow", "Monthly Available Amount and outflow"),
+        ("relative to income", "relative to Monthly Available Amount"),
+        ("meets or exceeds income", "meets or exceeds Monthly Available Amount"),
+        ("changes in income", "changes in Monthly Available Amount"),
+    )
+    adapted = text
+    for source, replacement in replacements:
+        adapted = adapted.replace(source, replacement)
+    return adapted
 
 
 @dataclass
@@ -372,6 +391,9 @@ def _behavioral_features(
         "monthly_reference_amount": monthly_amount,
         "avg_income": monthly_amount,
         "avg_income_source": "declared_monthly_reference_not_observed_salary",
+        "avg_income_category_debit_ratio": (
+            totals["income_category_debits"] / denominator
+        ),
         "avg_essential_ratio": totals["essentials"] / denominator,
         "avg_desire_ratio": totals["desire"] / denominator,
         "avg_repayment_ratio": totals["repayment"] / denominator,
@@ -520,7 +542,7 @@ def _analytical_quality(
             "Fewer than 30 included debit transactions are available for analysis."
         )
     if coverage_days < 30:
-        warnings.append("Statement coverage is shorter than 30 days.")
+        warnings.append("Included-debit coverage is shorter than 30 days.")
     if not stability_available:
         warnings.append(
             "The Stability component is unavailable because statement credits "
@@ -528,6 +550,12 @@ def _analytical_quality(
         )
     if not trend_available:
         warnings.append("Three-month trend claims are unavailable.")
+    if (transactions["final_category"] == "Income").any():
+        warnings.append(
+            "One or more included debit transactions are categorized as Income. "
+            "They remain visible as Income-labelled debit spending; review these "
+            "manual categories if that was not intended."
+        )
 
     if len(transactions) < 30 or coverage_days < 30:
         confidence = "Low"
@@ -622,12 +650,10 @@ def analyze_reviewed_transactions(
     )
 
     debit_rows = transactions["transaction_type"] == "debit"
-    credit_rows = transactions["transaction_type"] == "credit"
     category_summary: dict[str, dict[str, Any]] = {}
     for category in FINPULSE_CATEGORIES:
-        direction_mask = credit_rows if category == "Income" else debit_rows
         category_rows = transactions.loc[
-            direction_mask & (transactions["final_category"] == category)
+            debit_rows & (transactions["final_category"] == category)
         ]
         total = float(category_rows["amount"].sum())
         category_summary[category] = {
@@ -749,8 +775,17 @@ def analyze_reviewed_transactions(
         data_quality["analytical_confidence"],
     )
     legacy_features = _legacy_adapter(features)
-    signals = generate_signals(pd.Series(legacy_features))
-    recommendations = generate_recommendations(pd.Series(legacy_features))[:3]
+    signals = [
+        _upload_specific_language(signal)
+        for signal in generate_signals(pd.Series(legacy_features))
+    ]
+    recommendations = []
+    for recommendation in generate_recommendations(pd.Series(legacy_features))[:3]:
+        adapted_recommendation = dict(recommendation)
+        adapted_recommendation["recommendation"] = _upload_specific_language(
+            str(recommendation["recommendation"])
+        )
+        recommendations.append(adapted_recommendation)
 
     return UploadAnalyticsResult(
         statement_summary=statement_summary,

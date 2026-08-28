@@ -242,7 +242,7 @@ def _category_breakdown(analytics: UploadAnalyticsResult) -> pd.DataFrame:
                 "total": float(summary["total"]),
                 "monthly_normalized": float(summary["monthly_normalized"]),
                 "transaction_count": int(summary["transaction_count"]),
-                "cash_flow": "credit" if category == "Income" else "debit",
+                "cash_flow": "debit",
             }
         )
     return pd.DataFrame(rows)
@@ -286,6 +286,9 @@ def generate_financial_report(
         "Expense": features.get("avg_expense_ratio"),
         "Surplus/Remaining": features.get("avg_surplus_ratio"),
     }
+    income_category_debit_ratio = features.get("avg_income_category_debit_ratio")
+    if income_category_debit_ratio:
+        ratios["Income-labelled debit"] = income_category_debit_ratio
     low_confidence = (
         int((normalized_review["confidence"] == "Low").sum())
         if "confidence" in normalized_review.columns

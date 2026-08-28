@@ -33,7 +33,7 @@ CHANNEL_PREFIXES = re.compile(
     flags=re.IGNORECASE,
 )
 PAYMENT_HANDLE = re.compile(
-    r"(?<!\w)[a-z0-9.*_]{2,}@[a-z0-9._-]+",
+    r"(?<!\w)([a-z0-9.*_]{2,})@[a-z0-9._-]+",
     flags=re.IGNORECASE,
 )
 REFERENCE_TOKEN = re.compile(
@@ -113,6 +113,9 @@ def extract_receiver(description: object) -> str:
     if not cleaned:
         return ""
 
+    # Keep the handle's human/merchant portion only as a fallback. Adding it to
+    # an already useful narration duplicates names such as ``RAHUL KUMAR``.
+    handle_receivers = PAYMENT_HANDLE.findall(cleaned)
     without_handles = PAYMENT_HANDLE.sub(" ", cleaned)
     without_handles = REFERENCE_TOKEN.sub(" ", without_handles)
     without_handles = MASKED_FRAGMENT.sub(" ", without_handles)
@@ -136,6 +139,8 @@ def extract_receiver(description: object) -> str:
         candidates.append(candidate)
 
     if not candidates:
+        if handle_receivers:
+            return _humanize_receiver(handle_receivers[0])
         fallback = CHANNEL_PREFIXES.sub("", without_handles)
         fallback = LONG_NUMBER.sub(" ", fallback)
         return _humanize_receiver(fallback or cleaned)
