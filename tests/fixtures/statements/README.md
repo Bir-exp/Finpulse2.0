@@ -18,6 +18,7 @@ exceptional transactions, row diagnostics, and demo benchmarks is
 | `mixed_6months.xlsx` | Six-month normalization, trend, and volume stress case | 128 | Common bank aliases |
 | `alternate_bank_format.csv` | Alternate bank column-name compatibility | 16 | `Txn Date`, `Ref No`, narration and withdrawal/deposit aliases |
 | `amount_type_format.xlsx` | Single amount plus direction indicator | 18 | `Debit`, `Credit`, `DR`, and `CR` |
+| `synthetic_metadata_statement.xls` | Legacy Excel fixture with fake metadata before the table | 3 | `.xls`, header row detection, plural withdrawal alias |
 
 ## Preferred manual demo
 

@@ -1,6 +1,6 @@
 # FinPulse 2.0
 
-FinPulse 2.0 is a behavioral-finance analytics system that turns CSV or XLSX bank statements into an explainable, personalized financial-behavior report. It combines flexible statement ingestion, reviewable rule-based categorization, transparent scoring, behavioral signals, and practical recommendations while keeping uploaded data in the active Streamlit session.
+FinPulse 2.0 is a behavioral-finance analytics system that turns CSV, XLS, or XLSX bank statements into an explainable, personalized financial-behavior report. It combines flexible statement ingestion, reviewable rule-based categorization, transparent scoring, behavioral signals, and practical recommendations while keeping uploaded data in the active Streamlit session.
 
 Traditional payment and UPI applications primarily show transaction history and basic spending summaries. FinPulse goes further by interpreting how a person's reviewed spending relates to the monthly funds they say are available, while keeping the calculations inspectable and the limitations explicit.
 
@@ -9,7 +9,7 @@ Traditional payment and UPI applications primarily show transaction history and 
 ## What FinPulse 2.0 Does
 
 ```text
-Upload CSV/XLSX statement
+Upload CSV/XLS/XLSX statement
           ↓
 Normalize statement
           ↓
@@ -30,7 +30,7 @@ The original FinPulse v1 synthetic-user dashboard and its frozen segmentation as
 
 ## Key Features
 
-- Flexible CSV and XLSX statement ingestion
+- Flexible CSV, XLS, and XLSX statement ingestion
 - Case-insensitive, alias-aware column detection with manual mapping fallback
 - Layered merchant, phrase, keyword, context, and conservative fuzzy categorization
 - High, Medium, and Low categorization confidence
@@ -45,7 +45,13 @@ The original FinPulse v1 synthetic-user dashboard and its frozen segmentation as
 
 ## Supported Input
 
-FinPulse accepts CSV and XLSX bank statements. PDF parsing is future work.
+FinPulse accepts CSV, legacy XLS, and XLSX bank statements. PDF parsing is future work.
+
+Spreadsheet and CSV ingestion scans for the transaction-table header instead of
+assuming it appears in the first row. Account/statement metadata above the
+transaction table is ignored, multi-sheet Excel workbooks are inspected
+deterministically for the strongest transaction-table candidate, and diagnostics
+report only privacy-safe structure such as sheet number and header row.
 
 Bank formats vary, so column names are normalized case-insensitively and matched against common aliases. The priority real-world-style schema is:
 
@@ -298,7 +304,7 @@ For deployment, use platform secret management if future integrations require cr
 
 ## Limitations
 
-- CSV and XLSX only; PDF statements are not yet supported.
+- CSV, XLS, and XLSX only; PDF statements are not yet supported.
 - Bank formats vary, and some may require manual column mapping.
 - Merchant descriptions can be incomplete or ambiguous; users should review categories.
 - The rule-based score is heuristic and not calibrated against real financial outcomes.

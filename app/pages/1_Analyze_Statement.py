@@ -128,6 +128,13 @@ def _render_diagnostics(diagnostics: dict[str, object]) -> None:
     start_date, end_date = diagnostics["date_range"]
     if start_date and end_date:
         st.caption(f"Detected statement range: {start_date} to {end_date}")
+    if diagnostics.get("header_row_number"):
+        st.caption(
+            "Transaction table detected on "
+            f"{diagnostics.get('selected_sheet') or 'the uploaded file'}; "
+            f"header row {diagnostics['header_row_number']}. "
+            f"Ignored {diagnostics.get('metadata_rows_ignored', 0)} metadata rows."
+        )
 
     missing = diagnostics["missing_required_fields"]
     if missing:
@@ -154,7 +161,12 @@ def _render_diagnostics(diagnostics: dict[str, object]) -> None:
     rejected = st.session_state.get(REJECTED_ROWS_KEY)
     if isinstance(rejected, pd.DataFrame) and not rejected.empty:
         with st.expander("Inspect rows excluded during cleaning"):
-            st.dataframe(rejected, width="stretch")
+            safe_columns = [
+                column
+                for column in ("_source_row", "_drop_reason")
+                if column in rejected.columns
+            ]
+            st.dataframe(rejected[safe_columns], width="stretch")
 
 
 def _mapping_select(
@@ -870,7 +882,7 @@ st.markdown(
 st.title("Analyze Your Bank Statement")
 st.caption(
     "Your uploaded statement is processed for this session and is not written "
-    "to the FinPulse database. CSV and XLSX are supported; PDF is not yet supported."
+    "to the FinPulse database. CSV, XLS, and XLSX are supported; PDF is not yet supported."
 )
 
 existing_report = st.session_state.get(REPORT_KEY)
@@ -890,8 +902,8 @@ if st.session_state.pop("report_transaction_changes_saved", False):
 with st.form("statement_setup_form"):
     uploaded_file = st.file_uploader(
         "Upload Statement",
-        type=["csv", "xlsx"],
-        help="CSV and XLSX statements are supported. PDF support will be added later.",
+        type=["csv", "xls", "xlsx"],
+        help="CSV, XLS, and XLSX statements are supported. PDF support will be added later.",
     )
     monthly_available_amount = st.number_input(
         "Monthly Available Amount",
@@ -915,7 +927,7 @@ with st.form("statement_setup_form"):
 
 if analyze_statement:
     if uploaded_file is None:
-        st.error("Upload a CSV or XLSX bank statement before analyzing.")
+        st.error("Upload a CSV, XLS, or XLSX bank statement before analyzing.")
     elif monthly_available_amount is None or monthly_available_amount <= 0:
         st.error("Monthly Available Amount is required and must be greater than zero.")
     elif monthly_budget is not None and monthly_budget <= 0:

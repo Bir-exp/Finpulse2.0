@@ -1,4 +1,4 @@
-"""Read and standardize CSV/XLSX bank statements.
+"""Read and standardize CSV/XLS/XLSX bank statements.
 
 This module deliberately has no Streamlit or database dependency.  It stops
 when required columns are missing or ambiguous and returns enough structured
@@ -8,12 +8,13 @@ metadata for a later manual-mapping interface to resolve the problem.
 from __future__ import annotations
 
 from collections import Counter
+import csv
 from dataclasses import dataclass
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 import re
-from typing import BinaryIO, Iterable, Mapping
+from typing import Any, BinaryIO, Iterable, Mapping
 import unicodedata
 
 import numpy as np
@@ -44,6 +45,7 @@ COLUMN_ALIASES = {
     "transaction_id": {
         "transaction id",
         "transactionid",
+        "trasnaction id",
         "transaction number",
         "txn id",
         "reference no",
@@ -57,8 +59,10 @@ COLUMN_ALIASES = {
     },
     "debit": {
         "withdraw",
+        "withdrawals",
         "withdrawal",
         "withdraw amount",
+        "withdrawals amount",
         "withdrawal amount",
         "debit",
         "debit amount",
@@ -171,6 +175,25 @@ class IngestionDiagnostics:
     debit_transactions: int
     credit_transactions: int
     dropped_row_reasons: dict[str, int]
+    source_format: str = "dataframe"
+    selected_sheet: str | None = None
+    header_row_number: int | None = None
+    metadata_rows_ignored: int = 0
+    irrelevant_column_count: int = 0
+    sheet_selection: dict[str, Any] | None = None
+    privacy_notice: str | None = None
+
+
+@dataclass(frozen=True)
+class _HeaderCandidate:
+    frame: pd.DataFrame
+    mapping_result: MappingResult
+    score: int
+    sheet_index: int
+    row_index: int
+    data_like_rows: int
+    column_count: int
+    selected_sheet: str
 
 
 @dataclass
@@ -276,6 +299,197 @@ def detect_column_mapping(columns: Iterable[object]) -> MappingResult:
         missing_required_fields=missing,
         amount_layout=amount_layout,
     )
+
+
+def _candidate_fields(mapping_result: MappingResult) -> set[str]:
+    return {
+        field
+        for field, candidates in mapping_result.candidates.items()
+        if candidates
+    }
+
+
+def _has_header_evidence(mapping_result: MappingResult, column_count: int) -> bool:
+    fields = _candidate_fields(mapping_result)
+    has_named_amount = bool({"debit", "credit", "amount"} & fields)
+    has_typed_amount = {"amount", "transaction_type"}.issubset(fields)
+    has_amount_evidence = bool({"debit", "credit"} & fields) or has_typed_amount
+    has_core = "date" in fields and "description" in fields
+    if has_core and has_amount_evidence:
+        return True
+
+    # Keep manual-mapping fallback usable for bank-specific amount labels such
+    # as Money Out/Money In while still requiring more than a single keyword.
+    return has_core and has_named_amount is False and column_count >= 4
+
+
+def _unique_column_names(values: Iterable[object]) -> list[str]:
+    names: list[str] = []
+    counts: Counter[str] = Counter()
+    for position, value in enumerate(values, start=1):
+        text = _optional_text(value) or f"_ignored_column_{position}"
+        counts[text] += 1
+        if counts[text] > 1:
+            text = f"{text} ({counts[text]})"
+        names.append(text)
+    return names
+
+
+def _header_score(
+    mapping_result: MappingResult,
+    frame: pd.DataFrame,
+) -> tuple[int, int]:
+    fields = _candidate_fields(mapping_result)
+    score = 0
+    if "date" in fields:
+        score += 30
+    if "description" in fields:
+        score += 30
+    if "debit" in fields:
+        score += 20
+    if "credit" in fields:
+        score += 20
+    if {"amount", "transaction_type"}.issubset(fields):
+        score += 35
+    if "transaction_id" in fields:
+        score += 8
+    if "balance" in fields:
+        score += 6
+    if mapping_result.is_valid:
+        score += 25
+    score -= len(mapping_result.ambiguous_mappings) * 8
+
+    data_like_rows = 0
+    selected = mapping_result.mapping
+    for _, row in frame.head(25).iterrows():
+        if not selected:
+            continue
+        date_ok = "date" in selected and not pd.isna(_parse_date(row[selected["date"]]))
+        desc_ok = (
+            "description" in selected
+            and _optional_text(row[selected["description"]]) is not None
+        )
+        amount_ok = False
+        if mapping_result.amount_layout == "separate_debit_credit":
+            debit = (
+                _parse_number(row[selected["debit"]])
+                if "debit" in selected
+                else np.nan
+            )
+            credit = (
+                _parse_number(row[selected["credit"]])
+                if "credit" in selected
+                else np.nan
+            )
+            amount_ok = (
+                (not np.isnan(debit) and abs(debit) > 0)
+                or (not np.isnan(credit) and abs(credit) > 0)
+            )
+        elif mapping_result.amount_layout == "amount_and_transaction_type":
+            amount = _parse_number(row[selected["amount"]])
+            direction = _normalize_direction(row[selected["transaction_type"]])
+            amount_ok = not np.isnan(amount) and amount != 0 and direction is not None
+        if date_ok and desc_ok and amount_ok:
+            data_like_rows += 1
+
+    score += min(data_like_rows, 10) * 5
+    return score, data_like_rows
+
+
+def _transaction_table_candidate(
+    raw: pd.DataFrame,
+    *,
+    sheet_index: int = 0,
+    row_index: int,
+) -> _HeaderCandidate | None:
+    header = _unique_column_names(raw.iloc[row_index].tolist())
+    mapping_result = detect_column_mapping(header)
+    if not _has_header_evidence(mapping_result, len(header)):
+        return None
+
+    frame = raw.iloc[row_index + 1 :].reset_index(drop=True).copy()
+    frame.columns = header
+    score, data_like_rows = _header_score(mapping_result, frame)
+    return _HeaderCandidate(
+        frame=frame,
+        mapping_result=mapping_result,
+        score=score,
+        sheet_index=sheet_index,
+        row_index=row_index,
+        data_like_rows=data_like_rows,
+        column_count=len(header),
+        selected_sheet=f"sheet {sheet_index + 1}",
+    )
+
+
+def _detect_transaction_table(
+    sheets: Iterable[tuple[int, str, pd.DataFrame]],
+) -> tuple[pd.DataFrame, MappingResult | None, dict[str, Any]]:
+    candidates: list[_HeaderCandidate] = []
+    fallback: _HeaderCandidate | None = None
+
+    for sheet_index, _sheet_name, raw in sheets:
+        if raw.empty:
+            continue
+        for row_index in range(len(raw)):
+            candidate = _transaction_table_candidate(
+                raw,
+                sheet_index=sheet_index,
+                row_index=row_index,
+            )
+            if candidate is None:
+                continue
+            if fallback is None:
+                fallback = candidate
+            if candidate.mapping_result.is_valid and candidate.data_like_rows > 0:
+                candidates.append(candidate)
+
+    selected = sorted(
+        candidates or ([fallback] if fallback is not None else []),
+        key=lambda item: (-item.score, item.sheet_index, item.row_index),
+    )
+    if not selected:
+        empty_mapping = detect_column_mapping(())
+        return (
+            pd.DataFrame(),
+            empty_mapping,
+            {
+                "source_format": "unknown",
+                "selected_sheet": None,
+                "header_row_number": None,
+                "metadata_rows_ignored": 0,
+                "sheet_selection": {
+                    "status": "no_transaction_table_detected",
+                    "candidate_count": 0,
+                },
+            },
+        )
+
+    best = selected[0]
+    near_ties = [
+        {
+            "sheet": candidate.selected_sheet,
+            "header_row_number": candidate.row_index + 1,
+            "score": candidate.score,
+        }
+        for candidate in selected[1:]
+        if best.score - candidate.score <= 8
+    ]
+    status = "selected"
+    if near_ties:
+        status = "selected_with_similar_candidate"
+    context = {
+        "selected_sheet": best.selected_sheet,
+        "header_row_number": best.row_index + 1,
+        "metadata_rows_ignored": best.row_index,
+        "sheet_selection": {
+            "status": status,
+            "candidate_count": len(selected),
+            "selected_score": best.score,
+            "similar_candidates": near_ties,
+        },
+    }
+    return best.frame, best.mapping_result, context
 
 
 def _manual_mapping_result(
@@ -474,6 +688,7 @@ def _diagnostics(
     mapping_result: MappingResult,
     rejected_rows: pd.DataFrame,
     source_columns: Iterable[object],
+    read_context: Mapping[str, Any] | None = None,
 ) -> IngestionDiagnostics:
     if transactions.empty:
         date_range: tuple[str | None, str | None] = (None, None)
@@ -492,6 +707,9 @@ def _diagnostics(
         if not rejected_rows.empty
         else Counter()
     )
+    selected_columns = set(mapping_result.mapping.values())
+    irrelevant_columns = max(0, len(tuple(source_columns)) - len(selected_columns))
+    context = dict(read_context or {})
     return IngestionDiagnostics(
         original_row_count=original_count,
         cleaned_row_count=len(transactions),
@@ -505,12 +723,25 @@ def _diagnostics(
         debit_transactions=debit_count,
         credit_transactions=credit_count,
         dropped_row_reasons=dict(reason_counts),
+        source_format=str(context.get("source_format", "dataframe")),
+        selected_sheet=context.get("selected_sheet"),
+        header_row_number=context.get("header_row_number"),
+        metadata_rows_ignored=int(context.get("metadata_rows_ignored", 0) or 0),
+        irrelevant_column_count=irrelevant_columns,
+        sheet_selection=context.get("sheet_selection"),
+        privacy_notice=(
+            "Account or statement metadata outside the transaction table is "
+            "ignored and is not exposed in diagnostics."
+            if context.get("metadata_rows_ignored")
+            else None
+        ),
     )
 
 
 def standardize_transactions(
     df: pd.DataFrame,
     mapping: Mapping[str, str] | MappingResult | None = None,
+    read_context: Mapping[str, Any] | None = None,
 ) -> IngestionResult:
     """Convert a source DataFrame into the standard transaction schema.
 
@@ -548,6 +779,7 @@ def standardize_transactions(
                 mapping_result,
                 rejected_rows,
                 df.columns,
+                read_context,
             ),
             mapping_result=mapping_result,
             rejected_rows=rejected_rows,
@@ -660,6 +892,7 @@ def standardize_transactions(
             mapping_result,
             rejected_rows,
             df.columns,
+            read_context,
         ),
         mapping_result=mapping_result,
         rejected_rows=rejected_rows,
@@ -696,18 +929,38 @@ def _read_csv(data: bytes) -> pd.DataFrame:
     errors = []
     for encoding in ("utf-8-sig", "utf-8", "cp1252"):
         try:
-            return pd.read_csv(
-                BytesIO(data),
-                sep=None,
-                engine="python",
-                dtype=object,
-                keep_default_na=False,
-                skip_blank_lines=False,
-                encoding=encoding,
-            )
-        except (UnicodeDecodeError, pd.errors.ParserError) as error:
+            text = data.decode(encoding)
+            sample = text[:4096]
+            try:
+                dialect = csv.Sniffer().sniff(sample)
+            except csv.Error:
+                dialect = csv.excel
+            rows = list(csv.reader(text.splitlines(), dialect))
+            if not rows:
+                raise pd.errors.EmptyDataError("No columns to parse from file")
+            width = max(len(row) for row in rows)
+            normalized_rows = [row + [""] * (width - len(row)) for row in rows]
+            return pd.DataFrame(normalized_rows, dtype=object)
+        except (UnicodeDecodeError, csv.Error, pd.errors.EmptyDataError) as error:
             errors.append(f"{encoding}: {error}")
     raise StatementReadError("Unable to parse CSV: " + "; ".join(errors))
+
+
+def _read_excel_sheets(data: bytes, engine: str) -> list[tuple[int, str, pd.DataFrame]]:
+    workbook = pd.ExcelFile(BytesIO(data), engine=engine)
+    sheets: list[tuple[int, str, pd.DataFrame]] = []
+    for index, sheet_name in enumerate(workbook.sheet_names):
+        frame = pd.read_excel(
+            workbook,
+            sheet_name=sheet_name,
+            header=None,
+            dtype=object,
+            keep_default_na=False,
+        )
+        sheets.append((index, sheet_name, frame))
+    if not sheets:
+        raise StatementReadError("Workbook contains no worksheets")
+    return sheets
 
 
 def read_statement(
@@ -715,7 +968,7 @@ def read_statement(
     filename: str | None = None,
     mapping: Mapping[str, str] | MappingResult | None = None,
 ) -> IngestionResult:
-    """Read a CSV/XLSX source and return standardized transactions.
+    """Read a CSV/XLS/XLSX source and return standardized transactions.
 
     ``mapping`` is an optional explicit FinPulse-field-to-source-column mapping
     used after an automatic mapping is missing or ambiguous.
@@ -726,17 +979,22 @@ def read_statement(
 
     try:
         if suffix == ".xlsx":
-            frame = pd.read_excel(
-                BytesIO(data),
-                engine="openpyxl",
-                dtype=object,
-                keep_default_na=False,
-            )
+            sheets = _read_excel_sheets(data, "openpyxl")
+            frame, detected_mapping, read_context = _detect_transaction_table(sheets)
+            read_context["source_format"] = "xlsx"
+        elif suffix == ".xls":
+            sheets = _read_excel_sheets(data, "xlrd")
+            frame, detected_mapping, read_context = _detect_transaction_table(sheets)
+            read_context["source_format"] = "xls"
         elif suffix == ".csv" or not suffix:
-            frame = _read_csv(data)
+            raw = _read_csv(data)
+            frame, detected_mapping, read_context = _detect_transaction_table(
+                [(0, "csv", raw)]
+            )
+            read_context["source_format"] = "csv"
         else:
             raise StatementReadError(
-                f"Unsupported statement format '{suffix}'. Use CSV or XLSX."
+                f"Unsupported statement format '{suffix}'. Use CSV, XLS, or XLSX."
             )
     except StatementReadError:
         raise
@@ -745,4 +1003,9 @@ def read_statement(
             f"Unable to read statement '{source_name}': {error}"
         ) from error
 
-    return standardize_transactions(frame, mapping=mapping)
+    selected_mapping = detected_mapping if mapping is None else mapping
+    return standardize_transactions(
+        frame,
+        mapping=selected_mapping,
+        read_context=read_context,
+    )
