@@ -17,6 +17,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from finpulse.categorization import categorize_transactions  # noqa: E402
+from finpulse.presentation import (  # noqa: E402
+    SPENDING_CATEGORIES,
+    build_overview_metrics,
+    format_inr,
+    format_percentage,
+    largest_spending_category,
+    statement_period_context,
+)
 from finpulse.reporting import (  # noqa: E402
     ANALYTICS_KEY,
     FILE_FINGERPRINT_KEY,
@@ -294,148 +302,126 @@ def _statement_coverage(transactions: pd.DataFrame) -> tuple[int, str, int]:
     )
 
 
-def _money(value: object) -> str:
-    if value is None or pd.isna(value):
-        return "Unavailable"
-    return f"₹{float(value):,.2f}"
+def _render_report_transactions(report: FinPulseReport) -> None:
+    transactions = st.session_state.get(WORKING_TRANSACTIONS_KEY)
+    if not isinstance(transactions, pd.DataFrame) or transactions.empty:
+        transactions = st.session_state.get(REVIEWED_TRANSACTIONS_KEY)
+    transactions = initialize_review_categories(transactions)
+    if transactions.empty:
+        st.info("Reviewed transactions are unavailable for this session.")
+        return
 
-
-def _percent(value: object) -> str:
-    if value is None or pd.isna(value):
-        return "Unavailable"
-    return f"{float(value) * 100:.1f}%"
-
-
-def _render_report(report: FinPulseReport) -> None:
-    analytics = report.analytics
-    statement = analytics.statement_summary
-
-    st.divider()
-    st.header("Your FinPulse Report")
+    included = int(transactions["include_in_analysis"].sum())
+    excluded = len(transactions) - included
+    st.subheader("Reviewed Transactions")
     st.caption(
-        "Generated from your confirmed categories and inclusion choices for this session."
+        "Correct a category or exclude exceptional transactions that do not "
+        "represent your normal financial behavior."
     )
+    st.write(f"**{included} of {len(transactions)} transactions included in analysis**")
+    if excluded:
+        st.caption(f"{excluded} transactions excluded")
 
-    st.subheader("1. Financial Snapshot")
-    snapshot = st.columns(5)
-    snapshot[0].metric(
-        "Monthly Available Amount", _money(statement.get("monthly_available_amount"))
-    )
-    snapshot[1].metric(
-        "Monthly-normalized spending",
-        _money(statement.get("monthly_normalized_debit_spending")),
-    )
-    snapshot[2].metric(
-        "Estimated remaining", _money(statement.get("remaining_amount_estimate"))
-    )
-    snapshot[3].metric(
-        "Analyzed debit coverage", f"{statement['coverage_days']} days"
-    )
-    snapshot[4].metric("Analyzed transactions", statement["transaction_count"])
-
-    budget = analytics.budget_summary
-    if budget is not None:
-        budget_columns = st.columns(4)
-        budget_columns[0].metric(
-            "Monthly Spending Budget", _money(budget["monthly_budget"])
+    simple_columns = [
+        column
+        for column in (
+            "date",
+            "receiver",
+            "final_category",
+            "include_in_analysis",
         )
-        budget_columns[1].metric(
-            "Budget Utilization", f"{budget['budget_utilization_percent']:.1f}%"
-        )
-        budget_columns[2].metric(
-            "Budget Variance", _money(abs(budget["budget_variance"]))
-        )
-        budget_columns[3].metric(
-            "Budget Status", "Over budget" if budget["over_budget"] else "Within budget"
-        )
-        variance_direction = "over" if budget["over_budget"] else "under"
-        st.caption(
-            f"Monthly-normalized spending is {_money(abs(budget['budget_variance']))} "
-            f"{variance_direction} the supplied budget."
-        )
-
-    st.markdown("#### Statement Cash Flow (informational)")
-    cash_flow = analytics.statement_cash_flow_summary
-    cash_columns = st.columns(4)
-    cash_columns[0].metric("Observed credits", _money(cash_flow["observed_credits"]))
-    cash_columns[1].metric("Observed debits", _money(cash_flow["observed_debits"]))
-    cash_columns[2].metric(
-        "Net statement cash flow", _money(cash_flow["net_statement_cash_flow"])
-    )
-    cash_columns[3].metric(
-        "Spending considered for analysis",
-        _money(cash_flow["spending_considered_for_analysis"]),
-    )
-    st.caption(
-        "Statement cash flow describes what happened in the account and includes "
-        "the full reviewed statement. FinPulse behavioral analytics use the "
-        "user-declared Monthly Available Amount and included debit transactions only."
-    )
-
-    st.subheader("2. Spending Breakdown")
-    spending = report.debit_spending_breakdown.copy()
-    positive_spending = spending.loc[spending["monthly_normalized"] > 0]
-    if positive_spending.empty:
-        st.info("No categorized debit spending is available to chart.")
-    else:
-        figure = px.bar(
-            positive_spending,
-            x="category",
-            y="monthly_normalized",
-            color="category",
-            labels={
-                "category": "Category",
-                "monthly_normalized": "Monthly-normalized amount",
+        if column in transactions.columns
+    ]
+    simple_view = transactions[simple_columns].copy()
+    if "amount" in transactions.columns:
+        simple_view.insert(2, "amount_display", transactions["amount"].map(format_inr))
+    with st.form("report_transaction_review_form"):
+        edited = st.data_editor(
+            simple_view,
+            key=f"report_transaction_editor_{st.session_state.get('review_editor_revision', 0)}",
+            width="stretch",
+            hide_index=True,
+            num_rows="fixed",
+            disabled=[
+                column
+                for column in simple_view.columns
+                if column not in {"final_category", "include_in_analysis"}
+            ],
+            column_config={
+                "date": st.column_config.DateColumn("Date", format="DD MMM YYYY"),
+                "receiver": st.column_config.TextColumn("Receiver"),
+                "amount_display": st.column_config.TextColumn("Amount"),
+                "final_category": st.column_config.SelectboxColumn(
+                    "Category",
+                    options=list(FINPULSE_CATEGORIES),
+                    required=True,
+                ),
+                "include_in_analysis": st.column_config.CheckboxColumn(
+                    "Include in FinPulse analysis",
+                    default=True,
+                ),
             },
         )
-        figure.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10))
-        figure.update_yaxes(tickprefix="₹", separatethousands=True)
-        st.plotly_chart(figure, width="stretch")
-    zero_categories = spending.loc[
-        spending["monthly_normalized"] == 0, "category"
-    ].tolist()
-    if zero_categories:
-        st.caption("No observed debit spending: " + ", ".join(zero_categories))
-    display_breakdown = spending[
-        ["category", "monthly_normalized", "total", "transaction_count"]
-    ].rename(
-        columns={
-            "category": "Category",
-            "monthly_normalized": "Monthly normalized",
-            "total": "Statement total",
-            "transaction_count": "Transactions",
-        }
-    )
-    st.dataframe(
-        display_breakdown,
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "Monthly normalized": st.column_config.NumberColumn(format="₹ %.2f"),
-            "Statement total": st.column_config.NumberColumn(format="₹ %.2f"),
-        },
-    )
+        save_changes = st.form_submit_button("Save Transaction Changes")
 
-    st.subheader("3. Behavioral Ratios")
+    if save_changes:
+        try:
+            updated = apply_review_edits(transactions, edited)
+            changed = (
+                not updated["final_category"].equals(transactions["final_category"])
+                or not updated["include_in_analysis"].equals(
+                    transactions["include_in_analysis"]
+                )
+            )
+            if changed:
+                st.session_state[WORKING_TRANSACTIONS_KEY] = updated
+                invalidate_review_confirmation(st.session_state)
+                _advance_editor_revision()
+                st.session_state["report_transaction_changes_saved"] = True
+                st.rerun()
+            else:
+                st.info("No transaction changes were detected.")
+        except (KeyError, TypeError, ValueError) as error:
+            st.error(f"Could not save transaction changes: {error}")
+
+    with st.expander("Categorization details"):
+        detail_columns = [
+            column
+            for column in (
+                "date",
+                "description",
+                "detailed_category",
+                "predicted_category",
+                "confidence",
+                "final_category",
+                "include_in_analysis",
+            )
+            if column in transactions.columns
+        ]
+        st.caption(
+            "These fields explain the automatic categorization. Predicted categories "
+            "remain unchanged when you correct the final category."
+        )
+        st.dataframe(
+            transactions[detail_columns],
+            width="stretch",
+            hide_index=True,
+        )
+
+
+def _render_advanced_analysis(report: FinPulseReport) -> None:
+    analytics = report.analytics
+    statement = analytics.statement_summary
+    score = analytics.score_result
+
+    st.subheader("Behavioral Ratios")
     ratio_items = list(report.behavioral_ratios.items())
     for start in range(0, len(ratio_items), 3):
         columns = st.columns(3)
         for column, (label, value) in zip(columns, ratio_items[start : start + 3]):
-            column.metric(f"{label} ratio", _percent(value))
+            column.metric(f"{label} ratio", format_percentage(value))
 
-    st.subheader("4. FinPulse Behavioral Score")
-    score = analytics.score_result
-    score_columns = st.columns([2, 2, 3])
-    score_columns[0].metric(
-        "FinPulse Behavioral Score", f"{score['finpulse_score']} / 100"
-    )
-    score_columns[1].metric("Score Band", score["score_band"])
-    score_columns[2].metric("Score Status", report.score_presentation.status_label)
-    if report.score_presentation.is_provisional:
-        st.warning(report.score_presentation.explanation)
-    else:
-        st.caption(report.score_presentation.explanation)
-
+    st.subheader("Score Components")
     component_names = {
         "spending_control": "Spending Control",
         "savings": "Savings",
@@ -446,59 +432,59 @@ def _render_report(report: FinPulseReport) -> None:
     for column, (key, component) in zip(
         component_columns, score["components"].items()
     ):
-        if component["available"]:
-            value = f"{component['score']} / {component['maximum']}"
-            help_text = None
-        else:
-            value = "Unavailable"
-            help_text = component.get("unavailable_reason")
-        column.metric(component_names[key], value, help=help_text)
+        value = (
+            f"{component['score']} / {component['maximum']}"
+            if component["available"]
+            else "Unavailable"
+        )
+        column.metric(
+            component_names[key],
+            value,
+            help=component.get("unavailable_reason"),
+        )
+    if report.score_presentation.is_provisional:
+        st.warning(report.score_presentation.explanation)
+    else:
+        st.caption(report.score_presentation.explanation)
 
-    st.subheader("5. Report Confidence")
+    st.subheader("Report Confidence and Coverage")
     quality = analytics.data_quality
-    st.metric("Report confidence", quality["analytical_confidence"])
-    st.caption(
-        "This describes statement coverage and behavioral evidence. It is separate "
-        "from transaction categorization confidence and persona confidence."
-    )
+    quality_columns = st.columns(3)
+    quality_columns[0].metric("Report Confidence", quality["analytical_confidence"])
+    quality_columns[1].metric("Included Transactions", statement["transaction_count"])
+    quality_columns[2].metric("Coverage", f"{statement['coverage_days']} days")
     for warning in quality["warnings"]:
         st.markdown(f"- {warning}")
 
-    st.subheader("6. Behavioral Signals")
-    if analytics.signals:
-        for signal in analytics.signals:
-            st.markdown(f"- {signal}")
-    else:
-        st.info("No additional supported behavioral signals were identified.")
+    transactions = st.session_state.get(WORKING_TRANSACTIONS_KEY)
+    if isinstance(transactions, pd.DataFrame) and "confidence" in transactions:
+        st.markdown("#### Categorization Confidence")
+        counts = transactions["confidence"].value_counts()
+        confidence_columns = st.columns(3)
+        for position, confidence in enumerate(("High", "Medium", "Low")):
+            confidence_columns[position].metric(
+                confidence, int(counts.get(confidence, 0))
+            )
 
-    st.subheader("7. Recommendations")
-    if analytics.recommendations:
-        for recommendation in analytics.recommendations:
-            st.markdown(f"**{recommendation['category']}**")
-            st.write(recommendation["recommendation"])
-    else:
-        st.info("No additional deterministic recommendations were generated.")
+    summary = report.review_summary
     st.caption(
-        "FinPulse provides behavioral analytics for informational and educational "
-        "purposes and is not financial advice."
+        f"Manual corrections: {summary['manually_corrected']} · "
+        f"Low-confidence automatic classifications: "
+        f"{summary['low_confidence_automatic_classifications']}"
     )
 
-    st.subheader("8. K-Means Behavioral Segment")
+    st.subheader("K-Means Behavioral Segment")
     persona = report.persona
     if persona.persona_available:
-        st.caption("Prototype ML segment")
-        persona_columns = st.columns([3, 1])
+        persona_columns = st.columns(2)
         persona_columns[0].metric("Behavioral Segment", persona.persona_name)
         persona_columns[1].metric("Persona Confidence", persona.persona_confidence)
         if persona.persona_description:
             st.write(persona.persona_description)
         st.caption(
-            "Based on similarity to synthetic behavioral reference profiles. "
-            "This is a supporting prototype label, not a scientifically validated "
-            "consumer type."
+            "Prototype label based on synthetic behavioral reference profiles; "
+            "not production-validated customer segmentation."
         )
-        for reason in persona.reasons:
-            st.caption(reason)
     else:
         st.metric("Behavioral Segment", "Unavailable for uploaded statements")
         for reason in persona.reasons:
@@ -507,49 +493,209 @@ def _render_report(report: FinPulseReport) -> None:
             "Persona unavailability does not affect the rule-based FinPulse score."
         )
 
-    st.subheader("9. Transaction Review Summary")
-    summary = report.review_summary
-    summary_metrics = [
-        ("Total transactions", summary["transaction_count"]),
-        ("Included in analysis", summary["included_in_analysis"]),
-    ]
-    if summary["excluded_from_analysis"]:
-        summary_metrics.append(
-            ("Excluded from analysis", summary["excluded_from_analysis"])
-        )
-    summary_metrics.extend(
+    with st.expander("Technical feature availability"):
+        feature_rows = [
+            {
+                "Feature": name.replace("_", " ").title(),
+                "Availability": availability,
+            }
+            for name, availability in persona.feature_availability.items()
+        ]
+        st.dataframe(pd.DataFrame(feature_rows), width="stretch", hide_index=True)
+
+    diagnostics = st.session_state.get(DIAGNOSTICS_KEY)
+    if diagnostics:
+        with st.expander("Statement ingestion diagnostics"):
+            st.json(diagnostics)
+
+
+def _render_report(report: FinPulseReport) -> None:
+    analytics = report.analytics
+    statement = analytics.statement_summary
+    overview = build_overview_metrics(statement, analytics.score_result)
+
+    st.divider()
+    st.header("Your FinPulse Dashboard")
+    st.caption(
+        "Based on your confirmed categories and transaction inclusion choices."
+    )
+    overview_tab, spending_tab, improve_tab, transactions_tab, advanced_tab = st.tabs(
         (
-            ("Manual corrections", summary["manually_corrected"]),
-            (
-                "Low-confidence classifications",
-                summary["low_confidence_automatic_classifications"],
-            ),
+            "Overview",
+            "My Spending",
+            "Improve",
+            "Transactions",
+            "Advanced Analysis",
         )
     )
-    review_columns = st.columns(len(summary_metrics))
-    for column, (label, value) in zip(review_columns, summary_metrics):
-        column.metric(label, value)
-    if summary["excluded_from_analysis"]:
-        with st.expander("View transactions excluded from analysis"):
-            excluded_columns = [
-                column
-                for column in (
-                    "date",
-                    "receiver",
-                    "description",
-                    "amount",
-                    "transaction_type",
-                    "final_category",
-                    "confidence",
-                    "include_in_analysis",
-                )
-                if column in report.excluded_transactions.columns
-            ]
-            st.dataframe(
-                report.excluded_transactions[excluded_columns],
-                width="stretch",
-                hide_index=True,
+
+    with overview_tab:
+        first_row = st.columns(2)
+        first_row[0].metric(
+            "Monthly Available Amount",
+            format_inr(overview["monthly_available_amount"]),
+        )
+        first_row[1].metric(
+            overview["spending_label"], format_inr(overview["monthly_spending"])
+        )
+        first_row[1].caption(overview["period_context"])
+
+        second_row = st.columns(2)
+        amount_left = overview["estimated_amount_left"]
+        second_row[0].metric("Estimated Amount Left", format_inr(amount_left))
+        if amount_left is not None and float(amount_left) < 0:
+            second_row[0].caption(
+                f"Overspending by {format_inr(abs(float(amount_left)))} per month."
             )
+        else:
+            second_row[0].caption("After average monthly included debit spending.")
+        score_text = (
+            f"{overview['score']} / 100"
+            if overview["score"] is not None
+            else "Unavailable"
+        )
+        second_row[1].metric("FinPulse Score", score_text)
+        score_caption = str(overview["score_band"] or "")
+        if overview["provisional"]:
+            score_caption += " · PROVISIONAL"
+        second_row[1].caption(score_caption)
+        if overview["provisional"]:
+            second_row[1].caption(
+                "Based on the behavioral components currently available."
+            )
+
+        budget = analytics.budget_summary
+        if budget is not None:
+            st.markdown("#### Monthly Spending Budget")
+            budget_columns = st.columns(2)
+            budget_columns[0].metric(
+                "Monthly Spending Budget", format_inr(budget["monthly_budget"])
+            )
+            budget_columns[1].metric(
+                "Budget Used",
+                format_percentage(
+                    budget["budget_utilization_percent"], already_percent=True
+                ),
+            )
+            status = "over" if budget["over_budget"] else "within"
+            st.caption(
+                f"Average monthly spending is {status} the supplied budget by "
+                f"{format_inr(abs(budget['budget_variance']))}."
+            )
+
+        st.markdown("#### Where Your Money Goes")
+        spending = report.debit_spending_breakdown.copy()
+        display_categories = list(SPENDING_CATEGORIES)
+        if analytics.category_summary["Income"]["monthly_normalized"] > 0:
+            display_categories.append("Income")
+        spending = spending.loc[
+            spending["category"].isin(display_categories)
+            & (spending["monthly_normalized"] > 0)
+        ]
+        spending.loc[
+            spending["category"] == "Income", "category"
+        ] = "Income-labelled debit"
+        if spending.empty:
+            st.info("No included debit spending is available to chart.")
+        else:
+            figure = px.pie(
+                spending,
+                names="category",
+                values="monthly_normalized",
+                hole=0.55,
+            )
+            figure.update_layout(
+                legend_title_text="",
+                margin=dict(l=10, r=10, t=20, b=10),
+            )
+            st.plotly_chart(figure, width="stretch")
+            largest = largest_spending_category(analytics.category_summary)
+            if largest:
+                st.caption(
+                    f"Most of your average monthly spending goes toward {largest[0]}."
+                )
+
+    with spending_tab:
+        st.subheader("Average Monthly Spending by Category")
+        st.caption(overview["period_context"])
+        monthly_rows = []
+        statement_rows = []
+        display_categories = list(SPENDING_CATEGORIES)
+        if analytics.category_summary["Income"]["monthly_normalized"] > 0:
+            display_categories.append("Income")
+        for category in display_categories:
+            category_values = analytics.category_summary[category]
+            label = "Income-labelled debit" if category == "Income" else category
+            monthly_rows.append(
+                {
+                    "Category": label,
+                    "Monthly Average": format_inr(
+                        category_values["monthly_normalized"]
+                    ),
+                }
+            )
+            statement_rows.append(
+                {
+                    "Category": label,
+                    "Full Statement Total": format_inr(category_values["total"]),
+                    "Transactions": category_values["transaction_count"],
+                }
+            )
+        st.dataframe(pd.DataFrame(monthly_rows), width="stretch", hide_index=True)
+        with st.expander("Statement-period category totals"):
+            st.caption(
+                "These totals cover the included debit transactions across the full "
+                "analyzed period; they are not monthly spending values."
+            )
+            st.dataframe(
+                pd.DataFrame(statement_rows), width="stretch", hide_index=True
+            )
+
+        with st.expander("Full statement cash flow"):
+            cash_flow = analytics.statement_cash_flow_summary
+            st.caption(statement_period_context(cash_flow))
+            cash_columns = st.columns(3)
+            cash_columns[0].metric(
+                "Observed Credits", format_inr(cash_flow["observed_credits"])
+            )
+            cash_columns[1].metric(
+                "Observed Debits", format_inr(cash_flow["observed_debits"])
+            )
+            cash_columns[2].metric(
+                "Net Statement Cash Flow",
+                format_inr(cash_flow["net_statement_cash_flow"]),
+            )
+            st.caption(
+                "Statement cash flow describes what happened in the full uploaded "
+                "statement. FinPulse behavioral analytics use Monthly Available "
+                "Amount and included debit transactions only."
+            )
+
+    with improve_tab:
+        st.subheader("What to Focus On")
+        if analytics.signals:
+            for signal in analytics.signals:
+                st.markdown(f"- {signal}")
+        else:
+            st.info("No additional supported behavioral signals were identified.")
+
+        st.subheader("Recommendations")
+        if analytics.recommendations:
+            for recommendation in analytics.recommendations:
+                st.markdown(f"**{recommendation['category']}**")
+                st.write(recommendation["recommendation"])
+        else:
+            st.info("No additional deterministic recommendations were generated.")
+        st.caption(
+            "FinPulse provides behavioral analytics for informational and educational "
+            "purposes and is not financial advice."
+        )
+
+    with transactions_tab:
+        _render_report_transactions(report)
+
+    with advanced_tab:
+        _render_advanced_analysis(report)
 
 
 st.set_page_config(
@@ -558,11 +704,37 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown(
+    """
+    <style>
+    .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 3rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("Analyze Your Bank Statement")
 st.caption(
     "Your uploaded statement is processed for this session and is not written "
     "to the FinPulse database. CSV and XLSX are supported; PDF is not yet supported."
 )
+
+existing_report = st.session_state.get(REPORT_KEY)
+if isinstance(existing_report, FinPulseReport):
+    if st.button("Update Statement or Inputs"):
+        invalidate_report_state(st.session_state)
+        st.rerun()
+    _render_report(existing_report)
+    st.stop()
+
+if st.session_state.pop("report_transaction_changes_saved", False):
+    st.info(
+        "Transaction changes were saved. Confirm the reviewed transactions and "
+        "generate the report again to refresh the dashboard."
+    )
 
 with st.form("statement_setup_form"):
     uploaded_file = st.file_uploader(
@@ -694,8 +866,8 @@ if isinstance(working_transactions, pd.DataFrame) and not working_transactions.e
     st.divider()
     st.subheader("Review Transactions")
     st.caption(
-        "Predicted categories remain unchanged. Edit Final Category where a "
-        "correction is needed, then explicitly confirm the reviewed data."
+        "Correct a category or exclude exceptional transactions that do not "
+        "represent your normal financial behavior."
     )
     st.info(
         "Exclude exceptional transactions that do not represent your normal "
@@ -724,38 +896,38 @@ if isinstance(working_transactions, pd.DataFrame) and not working_transactions.e
         display_columns = [
             "date",
             "receiver",
-            "description",
-            "amount",
-            "transaction_type",
-            "detailed_category",
-            "predicted_category",
-            "confidence",
             "final_category",
             "include_in_analysis",
         ]
         display_columns = [
             column for column in display_columns if column in review_view.columns
         ]
+        review_display = review_view[display_columns].copy()
+        if "amount" in review_view.columns:
+            review_display.insert(
+                2, "amount_display", review_view["amount"].map(format_inr)
+            )
         editor_key = (
             f"statement_review_editor_{review_mode}_"
             f"{st.session_state['review_editor_revision']}"
         )
         edited_view = st.data_editor(
-            review_view[display_columns],
+            review_display,
             key=editor_key,
             width="stretch",
             hide_index=True,
             num_rows="fixed",
             disabled=[
                 column
-                for column in display_columns
+                for column in review_display.columns
                 if column not in {"final_category", "include_in_analysis"}
             ],
             column_config={
                 "date": st.column_config.DateColumn("Date", format="DD MMM YYYY"),
-                "amount": st.column_config.NumberColumn("Amount", format="₹ %.2f"),
+                "receiver": st.column_config.TextColumn("Receiver"),
+                "amount_display": st.column_config.TextColumn("Amount"),
                 "final_category": st.column_config.SelectboxColumn(
-                    "Final Category",
+                    "Category",
                     options=list(FINPULSE_CATEGORIES),
                     required=True,
                     help="This reviewed category is used by all report analytics.",
@@ -788,6 +960,30 @@ if isinstance(working_transactions, pd.DataFrame) and not working_transactions.e
                 invalidate_review_confirmation(st.session_state)
         except (KeyError, TypeError, ValueError) as error:
             st.error(f"Could not apply review edits: {error}")
+
+        with st.expander("Categorization details"):
+            technical_columns = [
+                column
+                for column in (
+                    "date",
+                    "description",
+                    "transaction_type",
+                    "detailed_category",
+                    "predicted_category",
+                    "confidence",
+                    "final_category",
+                )
+                if column in review_view.columns
+            ]
+            st.caption(
+                "Automatic categorization details are shown for transparency. "
+                "Your reviewed Category is the value used by FinPulse."
+            )
+            st.dataframe(
+                review_view[technical_columns],
+                width="stretch",
+                hide_index=True,
+            )
 
     included_review_count = int(working_transactions["include_in_analysis"].sum())
     excluded_review_count = len(working_transactions) - included_review_count
