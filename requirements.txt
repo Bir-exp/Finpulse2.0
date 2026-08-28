@@ -1,8 +1,9 @@
-numpy
-pandas
-scikit-learn
-streamlit
-plotly
-matplotlib
-openpyxl
-rapidfuzz
+numpy==2.5.2
+pandas==3.0.5
+scikit-learn==1.9.0
+streamlit==1.62.0
+plotly==7.0.0
+matplotlib==3.11.1
+openpyxl==3.1.5
+rapidfuzz==3.14.5
+joblib==1.5.3

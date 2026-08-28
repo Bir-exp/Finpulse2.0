@@ -598,7 +598,7 @@ with overview_tab:
 
         st.plotly_chart(
             wheel_fig,
-            use_container_width=True,
+            width="stretch",
             config={
                 "displayModeBar": False
             }
@@ -919,7 +919,7 @@ with overview_tab:
 
         st.plotly_chart(
             donut_fig,
-            use_container_width=True,
+            width="stretch",
             config={
                 "displayModeBar": False
             }
@@ -1094,7 +1094,7 @@ with year_tab:
 
         st.plotly_chart(
             spend_fig,
-            use_container_width=True
+            width="stretch"
         )
 
 
@@ -1132,7 +1132,7 @@ with year_tab:
 
         st.plotly_chart(
             savings_fig,
-            use_container_width=True
+            width="stretch"
         )
 
 
@@ -1162,7 +1162,7 @@ with year_tab:
 
         st.plotly_chart(
             repayment_fig,
-            use_container_width=True
+            width="stretch"
         )
 
 
@@ -1198,7 +1198,7 @@ with year_tab:
 
         st.plotly_chart(
             cash_fig,
-            use_container_width=True
+            width="stretch"
         )
 
 
@@ -1221,7 +1221,7 @@ with year_tab:
 
         st.plotly_chart(
             surplus_fig,
-            use_container_width=True
+            width="stretch"
         )
 
 
@@ -1287,7 +1287,7 @@ with year_tab:
 
     st.plotly_chart(
         timeline_fig,
-        use_container_width=True
+            width="stretch"
     )
 
 
@@ -1418,7 +1418,7 @@ with compare_tab:
 
     st.plotly_chart(
         compare_fig,
-        use_container_width=True
+        width="stretch"
     )
 
 
@@ -1549,7 +1549,7 @@ with compare_tab:
 
     st.plotly_chart(
         hist_fig,
-        use_container_width=True
+        width="stretch"
     )
 
 

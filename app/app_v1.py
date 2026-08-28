@@ -334,7 +334,7 @@ with left:
 
     st.plotly_chart(
         allocation_fig,
-        use_container_width=True
+        width="stretch"
     )
 
 
@@ -441,7 +441,7 @@ with right:
 
     st.plotly_chart(
         score_fig,
-        use_container_width=True
+        width="stretch"
     )
 
 
@@ -573,7 +573,7 @@ score_breakdown_fig.update_layout(
 
 st.plotly_chart(
     score_breakdown_fig,
-    use_container_width=True
+    width="stretch"
 )
 
 
@@ -687,7 +687,7 @@ trend_fig.update_layout(
 
 st.plotly_chart(
     trend_fig,
-    use_container_width=True
+    width="stretch"
 )
 
 
@@ -739,7 +739,7 @@ pressure_fig.update_layout(
 
 st.plotly_chart(
     pressure_fig,
-    use_container_width=True
+    width="stretch"
 )
 
 
@@ -865,7 +865,7 @@ comparison_fig.update_layout(
 
 st.plotly_chart(
     comparison_fig,
-    use_container_width=True
+    width="stretch"
 )
 
 

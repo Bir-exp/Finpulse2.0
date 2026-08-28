@@ -336,7 +336,9 @@ def _render_report(report: FinPulseReport) -> None:
     budget = analytics.budget_summary
     if budget is not None:
         budget_columns = st.columns(4)
-        budget_columns[0].metric("Monthly Budget", _money(budget["monthly_budget"]))
+        budget_columns[0].metric(
+            "Monthly Spending Budget", _money(budget["monthly_budget"])
+        )
         budget_columns[1].metric(
             "Budget Utilization", f"{budget['budget_utilization_percent']:.1f}%"
         )
@@ -452,9 +454,9 @@ def _render_report(report: FinPulseReport) -> None:
             help_text = component.get("unavailable_reason")
         column.metric(component_names[key], value, help=help_text)
 
-    st.subheader("5. Data / Report Confidence")
+    st.subheader("5. Report Confidence")
     quality = analytics.data_quality
-    st.metric("Behavioral report confidence", quality["analytical_confidence"])
+    st.metric("Report confidence", quality["analytical_confidence"])
     st.caption(
         "This describes statement coverage and behavioral evidence. It is separate "
         "from transaction categorization confidence and persona confidence."
@@ -477,8 +479,8 @@ def _render_report(report: FinPulseReport) -> None:
     else:
         st.info("No additional deterministic recommendations were generated.")
     st.caption(
-        "FinPulse provides behavioral analytics for informational purposes and is "
-        "not financial advice."
+        "FinPulse provides behavioral analytics for informational and educational "
+        "purposes and is not financial advice."
     )
 
     st.subheader("8. K-Means Behavioral Segment")
@@ -498,15 +500,7 @@ def _render_report(report: FinPulseReport) -> None:
         for reason in persona.reasons:
             st.caption(reason)
     else:
-        credit_incompatibility = any(
-            "bank credits" in reason.casefold() for reason in persona.reasons
-        )
-        unavailable_label = (
-            "Unavailable for uploaded statements"
-            if credit_incompatibility
-            else "Needs more history"
-        )
-        st.metric("Behavioral Segment", unavailable_label)
+        st.metric("Behavioral Segment", "Unavailable for uploaded statements")
         for reason in persona.reasons:
             st.markdown(f"- {reason}")
         st.caption(

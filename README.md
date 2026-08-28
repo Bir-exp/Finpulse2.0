@@ -1,743 +1,270 @@
-# FinPulse — Behavioral Finance Analytics for UPI-Style Transactions
+# FinPulse 2.0
 
-FinPulse is an end-to-end behavioral finance analytics project that analyzes UPI-style transaction data to understand how users manage money.
+FinPulse 2.0 is a behavioral-finance analytics system that turns CSV or XLSX bank statements into an explainable, personalized financial-behavior report. It combines flexible statement ingestion, reviewable rule-based categorization, transparent scoring, behavioral signals, and practical recommendations while keeping uploaded data in the active Streamlit session.
 
-The project combines:
+Traditional payment and UPI applications primarily show transaction history and basic spending summaries. FinPulse goes further by interpreting how a person's reviewed spending relates to the monthly funds they say are available, while keeping the calculations inspectable and the limitations explicit.
 
-- Synthetic financial data generation
-- SQLite-based data storage
-- SQL feature engineering
-- Python and Pandas analytics
-- Unsupervised machine learning with KMeans
-- Rule-based financial scoring
-- Behavioral signals and recommendations
-- Interactive Streamlit dashboards
+> FinPulse provides behavioral analytics for informational and educational purposes and is not financial advice.
 
-The main goal is not just to classify transactions, but to build a simple behavioral view of a user's financial habits.
+## What FinPulse 2.0 Does
 
----
+```text
+Upload CSV/XLSX statement
+          ↓
+Normalize statement
+          ↓
+Auto-categorize transactions
+          ↓
+User review, corrections, and exclusions
+          ↓
+Behavioral feature engineering
+          ↓
+Explainable scoring
+          ↓
+Signals and recommendations
+          ↓
+Personalized report
+```
 
-## Project Objective
-
-Traditional transaction dashboards mainly show what a user spent.
-
-FinPulse goes a step further by trying to answer questions such as:
-
-- How much of the user's income goes toward essential spending?
-- Is discretionary spending increasing?
-- Is repayment pressure high?
-- Does the user consistently allocate money toward savings or investments?
-- Is the user's income stable or variable?
-- Is the user frequently overspending?
-- Which broader behavioral pattern does the user resemble?
-- What financial areas should the user focus on improving?
-
-FinPulse converts transaction-level data into user-level behavioral insights.
-
----
+The original FinPulse v1 synthetic-user dashboard and its frozen segmentation assets remain available as a separate demonstration of the earlier analytical workflow.
 
 ## Key Features
 
-### Behavioral Segmentation
+- Flexible CSV and XLSX statement ingestion
+- Case-insensitive, alias-aware column detection with manual mapping fallback
+- Layered merchant, phrase, keyword, context, and conservative fuzzy categorization
+- High, Medium, and Low categorization confidence
+- Transaction review and category correction before analysis
+- Explicit inclusion or exclusion of exceptional transactions
+- User-declared Monthly Available Amount as the behavioral denominator
+- Optional Monthly Spending Budget and budget-utilization reporting
+- Explainable rule-based FinPulse Behavioral Score
+- Behavioral signals and deterministic recommendations
+- Session-only upload processing with no upload-workflow writes to SQLite
+- Privacy-safe synthetic statements for testing and demonstration
 
-FinPulse uses KMeans clustering to discover groups of users with similar financial behavior.
+## Supported Input
 
-The clustering model uses features such as:
+FinPulse accepts CSV and XLSX bank statements. PDF parsing is future work.
 
-- Essential spending ratio
-- Desire spending ratio
-- Repayment ratio
-- Investment ratio
-- Expense ratio
-- Overspending frequency
-- Income variability
-- Expense volatility
+Bank formats vary, so column names are normalized case-insensitively and matched against common aliases. The priority real-world-style schema is:
 
-KMeans produces numerical clusters rather than predefined personas.
+```text
+Date
+transactionId
+withdraw
+deposits
+balance
+remarks
+```
 
-After examining the average financial characteristics of each cluster, the clusters are interpreted and given human-readable behavioral names.
+Variants such as `Transaction ID`, `Txn ID`, `Debit Amount`, `Credit Amount`, `Narration`, and single `Amount` plus debit/credit indicator layouts are also supported. Transaction ID and balance are optional. If automatic detection is ambiguous, the Analyze Statement page provides manual column mapping.
 
-The current behavioral segments are:
+## Monthly Available Amount
 
-- Consistent Savers
-- Lifestyle-Heavy Spenders
-- Debt-Constrained Users
-- Financially Stretched Users
-- Variable-Income Users
+Monthly Available Amount is required and is not salary-only. It may represent:
 
-This keeps the machine learning process unsupervised while making the results understandable to users.
+- salary
+- stipend
+- pocket money
+- household allowance
+- other monthly funds available
 
----
+FinPulse uses this user-declared amount as financial capacity instead of treating every statement credit as income. Bank credits can include reimbursements, transfers, refunds, loans, or money temporarily passing through an account, so using all credits as verified recurring income would make behavioral ratios misleading.
 
-## FinPulse Score
+## Statement Cash Flow vs. Behavioral Analysis
 
-FinPulse also generates an interpretable financial wellness score out of 100.
+The report deliberately separates two views:
 
-The score is based on four components:
+- **Statement cash flow** reports observed credits, observed debits, and net statement cash flow for the reviewed full statement. It describes what happened in the account.
+- **Spending considered for analysis** is the total of included debit transactions used by FinPulse behavioral analytics.
 
-| Component | Maximum Score |
-|---|---:|
+Observed credits remain visible as statement information, but credits do not drive uploaded-user spending ratios, savings/remaining calculations, behavioral score, signals, recommendations, or K-Means feature generation. Excluded debits remain visible in the statement review and cash-flow summary but do not affect behavioral analytics.
+
+## Transaction Categorization
+
+Categorization is deterministic and layered:
+
+1. Transaction direction and context
+2. Known merchant rules
+3. Strong phrases
+4. Generic keywords
+5. Conservative fuzzy matching
+6. `Others` fallback
+
+Detailed labels such as Grocery or Food Delivery are first inferred, then mapped to the six FinPulse categories:
+
+- Income
+- Essentials
+- Desire
+- Repayment
+- Investment/Savings
+- Others
+
+Merchant descriptions can be incomplete or ambiguous, so classification is not assumed to be perfect. Users can review every transaction, focus on Low-confidence rows, correct `final_category`, and exclude exceptional transactions before confirming the report input. The original predicted category remains preserved for auditability.
+
+## Explainable Behavioral Score
+
+The FinPulse score is rule-based so its components remain understandable:
+
+| Component | Maximum points |
+| --- | ---: |
 | Spending Control | 30 |
 | Savings | 25 |
-| Debt | 25 |
+| Debt Management | 25 |
 | Stability | 20 |
 | **Total** | **100** |
 
-The overall score is converted into simple financial health bands such as:
+For uploaded statements, Stability is unavailable because arbitrary bank credits are not treated as verified recurring income history. Uploaded-user scores are therefore clearly marked **PROVISIONAL**: the available 80 points are normalized to 100, and the missing Stability component is not fabricated or silently replaced.
 
-- Strong
-- Stable
-- Watchful
-- Strained
-- High Pressure
+## K-Means / ML
 
-Unlike the clustering model, the FinPulse Score is deliberately rule-based so that the logic remains transparent and explainable.
+FinPulse v1 includes a frozen K-Means behavioral segmentation prototype fitted on:
 
----
+- 1,000 synthetic reference users
+- eight behavioral features
+- five clusters (`k=5`)
 
-## Behavioral Signals
+The fitted scaler, K-Means model, feature order, and persona mapping are stored in `models/finpulse_kmeans_v1.joblib`. The artifact is preserved for reproducibility, and the synthetic dashboard demonstrates the five interpreted personas. This is not production-validated customer segmentation.
 
-FinPulse generates behavioral signals from the engineered user features.
+Uploaded-user persona inference is intentionally withheld. The frozen model requires `income_cv`, but that feature cannot be derived defensibly when arbitrary bank credits are not assumed to be recurring income. Showing no persona is a model-validity safeguard, not a runtime failure.
 
-Examples include:
+## Architecture
 
-- High spending pressure
-- Frequent overspending
-- High repayment burden
-- High discretionary spending
-- Low savings allocation
-- Variable income
-- Increasing spending trends
-- Improving or declining financial behavior
-
-These signals help explain why a user received a certain score or recommendation.
-
----
-
-## Personalized Recommendations
-
-FinPulse converts financial patterns into prioritized recommendations.
-
-Recommendations may focus on:
-
-- Spending control
-- Savings allocation
-- Debt management
-- Lifestyle spending
-- Income stability
-- Overspending behavior
-
-The system currently uses deterministic rules rather than generative AI.
-
-This makes the recommendation logic easy to inspect and explain.
-
----
-
-# System Architecture
 ```text
-Reference Transaction Dataset
-            │
-            ▼
-Synthetic Data Generator
-            │
-            ▼
-SQLite Database
-   users + transactions
-            │
-            ▼
-SQL Feature Engineering
-            │
-            ├── Monthly Features
-            ├── User-Level Features
-            └── Behavioral Trends
-            │
-            ▼
-Python / Pandas Feature Engineering
-            │
-            ▼
-      user_features
-            │
-     ┌──────┼───────────┐
-     │      │           │
-     ▼      ▼           ▼
-  KMeans  FinPulse   Behavioral
- Clusters   Score      Signals
-     │      │           │
-     └──────┼───────────┘
-            │
-            ▼
-     Recommendations
-            │
-            ▼
-    Streamlit Dashboard
+Uploaded statement
+        ↓
+    Ingestion
+        ↓
+ Standardization
+        ↓
+ Categorization
+        ↓
+   User review
+        ↓
+Included debit transactions ───────────────┐
+        ↓                                  │
+Feature engineering                       │
+        ↓                                  │
+Rule-based score / signals / recommendations
+        ↓
+      Report
+
+Synthetic reference users
+        ↓
+SQL + Python features
+        ↓
+Frozen scaler + K-Means (k=5)
+        ↓
+Synthetic dashboard personas
 ```
----
 
-# Dataset Strategy
+## Repository Structure
 
-FinPulse uses a synthetic UPI-style financial dataset representing:
-
-* 1,000 users
-* 12 months of financial activity
-* Multiple transaction categories
-* Different income levels
-* Different spending and saving behaviors
-
-The synthetic dataset is generated using controlled behavioral assumptions so that the population contains a realistic range of financial patterns.
-
-The original reference transaction dataset is used only as a supporting input for parts of the synthetic data generation process.
-
-The production dataset used by the application is stored directly in SQLite rather than maintained as duplicate CSV files.
-
----
-
-## Transaction Categories
-
-Transactions are grouped into six high-level financial categories:
-
-* Income
-* Essentials
-* Desire
-* Repayment
-* Investment / Savings
-* Others
-
-The project intentionally uses broad behavioral categories instead of detailed merchant-level classification because the main objective is customer financial behavior analysis.
-
----
-
-# Database Design
-
-FinPulse uses SQLite as the central source of truth.
-
-The database contains base, derived, and analytical tables.
-
-### Base Tables
-
-* `users`
-* `transactions`
-
-### Feature Tables
-
-* `monthly_features`
-* `user_features_base`
-* `user_trends`
-* `user_features`
-
-### Analytical Output Tables
-
-* `behavioral_signals`
-* `user_scores`
-* `recommendations`
-* `user_segments`
-* `cluster_profiles`
-
-This structure separates raw transaction storage from analytics and model outputs.
-
----
-
-# SQL Feature Engineering
-
-SQL is used for meaningful analytical transformations rather than only data retrieval.
-
-The project includes three major SQL pipelines.
-
-### Monthly Feature Engineering
-
-`sql/01_monthly_features.sql`
-
-Creates user-month financial metrics using conditional aggregation.
-
-Examples include:
-
-* Monthly income
-* Essential spending
-* Desire spending
-* Repayment
-* Investment allocation
-* Total outflow
-* Monthly surplus
-* Category ratios
-* Transaction counts
-* Overspending flags
-
-### User-Level Feature Engineering
-
-`sql/02_user_features.sql`
-
-Aggregates monthly behavior into long-term user characteristics.
-
-Examples include:
-
-* Average income
-* Average spending ratios
-* Average savings ratio
-* Average repayment ratio
-* Expense ratio
-* Monthly transaction activity
-* Overspending frequency
-
-### Behavioral Trend Engineering
-
-`sql/03_user_trends.sql`
-
-Uses CTEs and SQL window functions to compare recent behavior.
-
-For example, it compares the most recent three months with the previous three months for:
-
-* Income
-* Desire spending
-* Repayment
-* Investment
-* Expense ratio
-* Surplus ratio
-
-This allows FinPulse to identify whether a user's financial behavior is improving or deteriorating.
-
----
-
-# Python Feature Engineering
-
-SQL-generated features are enriched using Pandas and NumPy.
-
-Additional features include:
-
-* Median income
-* Income standard deviation
-* Income coefficient of variation
-* Expense ratio volatility
-* Desire spending volatility
-* Repayment volatility
-* Investment volatility
-
-The final feature table is stored as:
-
-`user_features`
-
-This table becomes the main analytical input for segmentation, scoring, signals, and recommendations.
-
----
-
-# Machine Learning — KMeans Segmentation
-
-FinPulse uses unsupervised learning because there are no reliable ground-truth labels defining the correct financial persona for each user.
-
-Before clustering, features are standardized using `StandardScaler`.
-
-KMeans is evaluated across multiple values of `k` using:
-
-* Elbow method
-* Silhouette score
-* Cluster interpretability
-
-The final model uses:
-
-KMeans(
-    n_clusters=5,
-    random_state=42,
-    n_init=20
-)
-
-
-The selected features are:
-
-FEATURE_COLUMNS = [
-    "avg_essential_ratio",
-    "avg_desire_ratio",
-    "avg_repayment_ratio",
-    "avg_investment_ratio",
-    "avg_expense_ratio",
-    "overspending_month_ratio",
-    "income_cv",
-    "expense_ratio_volatility",
-]
-
-
----
-
-## Cluster Interpretation
-
-The model itself only discovers numerical clusters.
-
-Cluster names are assigned after analyzing the average financial profile of each cluster.
-
-For example, a cluster with:
-
-* High discretionary spending
-* Low investment allocation
-* High expense ratio
-* Stable income
-
-can reasonably be interpreted as:
-
-**Lifestyle-Heavy Spenders**
-
-This separation is important:
-
-> KMeans discovers similar behavioral groups. Human interpretation gives those groups meaningful financial labels.
-
----
-
-# Exploratory Data Analysis
-
-The project contains two notebooks.
-
-### `01_eda.ipynb`
-
-Focuses on:
-
-* Data quality
-* Transaction distributions
-* Income distributions
-* Category behavior
-* Monthly financial activity
-* Overspending
-* Allocation ratios
-* Population-level trends
-* Individual user examples
-
-### `02_clustering_analysis.ipynb`
-
-Focuses on:
-
-* Feature preparation
-* Feature scaling
-* Elbow analysis
-* Silhouette scores
-* Final KMeans model
-* Cluster sizes
-* Cluster profiles
-* PCA visualization
-* Behavioral interpretation
-* Production model validation
-
-The notebooks are used for analysis and model justification.
-
-They are not part of the runtime application pipeline.
-
----
-
-# Streamlit Dashboard
-
-FinPulse includes two dashboard versions.
-
-### Main Dashboard
-
-`app/app.py`
-
-This is the polished user-facing version.
-
-It focuses on presenting financial insights in a simple and understandable way.
-
-Major sections include:
-
-* Financial overview
-* Money personality
-* FinPulse Score
-* Income allocation
-* Behavioral signals
-* Annual financial trends
-* Overspending timeline
-* Peer comparison
-* Recommendations
-* What-if simulation
-
-## Dashboard Preview
-
-### Financial Overview
-
-![FinPulse Overview](assets/finpulse_overview.png)
-
-![FinPulse Overview](assets/finpulse_overview2.png)
-
-### Yearly Behavioral Analysis
-
-![FinPulse Year Analysis](assets/finpulse_year.png)
-
-### Personalized Improvement
-
-![FinPulse Recommendations](assets/finpulse_improve.png)
-
-### Analytical Dashboard
-
-`app/app_v1.py`
-
-The earlier dashboard is retained as a more analytical version of the application.
-
----
-
-# Dashboard Experience
-
-The main dashboard is designed around four areas:
-
-### Overview
-
-Provides a quick summary of the user's financial behavior.
-
-Includes:
-
-* Money personality
-* FinPulse Score
-* Financial health summary
-* Income allocation
-* Behavioral observations
-
-### My Year
-
-Shows how the user's financial behavior changes over time.
-
-Users can explore:
-
-* Spending
-* Savings
-* Repayments
-* Cash flow
-* Overspending periods
-
-### Compare
-
-Compares the selected user with:
-
-* Their behavioral segment
-* The broader user population
-
-This helps provide context rather than showing financial metrics in isolation.
-
-### Improve
-
-Shows prioritized financial recommendations and includes a simplified what-if simulator.
-
-The simulator demonstrates how changing discretionary spending or savings allocation could affect parts of the FinPulse Score.
-
-It is intended for educational exploration rather than financial forecasting.
-
----
-# Project Structure
 ```text
-
-Finpulse/
-│
-├── app/
-│   ├── app.py
-│   └── app_v1.py
-│
-├── data/
-│   ├── raw/
-│   │   └── MyTransaction.csv
-│   │
-│   └── validation/
-│       ├── finpulse_generation_audit.csv
-│       └── finpulse_monthly_generation_validation.csv
-│
-├── database/
-│   └── finpulse.db
-│
-├── notebooks/
-│   ├── 01_eda.ipynb
-│   └── 02_clustering_analysis.ipynb
-│
-├── scripts/
-│   ├── generate_finpulse_dataset.py
-│   ├── build_features.py
-│   ├── signal_engine.py
-│   ├── score_engine.py
-│   ├── recommendation_engine.py
-│   ├── segmentation_engine.py
-│   └── run_pipeline.py
-│
-├── sql/
-│   ├── 01_monthly_features.sql
-│   ├── 02_user_features.sql
-│   └── 03_user_trends.sql
-│
-├── .gitignore
-├── requirements.txt
-└── README.md
+app/        Streamlit entrypoint, original dashboard, and Analyze Statement page
+finpulse/   Ingestion, categorization, review, upload analytics, reporting, inference
+scripts/    Original synthetic-data, feature, score, signal, and model tooling
+sql/        SQL feature-engineering pipeline for synthetic/reference users
+models/     Frozen v1 segmentation artifact
+tests/      Unit, integration, reconciliation, and synthetic statement fixtures
+data/       Original reference and validation assets
+database/   Bundled FinPulse v1 SQLite database
+notebooks/  Exploratory analysis and clustering rationale
+requirements-dev.txt  Test-only dependencies layered on production requirements
 ```
----
 
-# Running the Project
+The upload path is in-memory and separate from the SQLite-backed synthetic dashboard. Do not run `scripts/run_pipeline.py` merely to launch the application; the required v1 database and frozen model are already bundled.
 
-## 1. Clone the Repository
+## Demo
 
-git clone <your-repository-url>
-cd Finpulse
+The preferred privacy-safe demo uses [tests/fixtures/statements/student_1month.xlsx](tests/fixtures/statements/student_1month.xlsx). All bundled statement fixtures are deterministic synthetic data; they do not contain real bank or customer information.
 
+Use:
 
-## 2. Create a Virtual Environment
+- Monthly Available Amount: **₹5,000**
+- Monthly Spending Budget: **₹4,500**
 
+During review:
 
-python3 -m venv venv
-source venv/bin/activate
+1. Change `STU-AMAZON` from `Others` to `Essentials` for the demo assumption that it represents study or household supplies.
+2. Exclude `STU-TEMP-CREDIT`.
+3. Exclude `STU-TEMP-DEBIT`.
+4. Confirm the reviewed transactions.
+5. Generate the report.
 
+Expected synthetic benchmark values are approximately:
 
-On Windows:
+| Metric | Expected value |
+| --- | ---: |
+| Spending considered for analysis | ₹7,273 |
+| Essentials | ₹3,975 |
+| Desire | ₹2,488 |
+| Others | ₹810 |
+| Expense ratio | 145.46% |
+| Budget utilization | 161.62% |
 
+Observed statement cash flow still includes the synthetic temporary credit/debit pair because cash flow describes the full statement, while behavioral analytics exclude the reviewed exceptional transactions.
 
-venv\Scripts\activate
+## Running Locally
 
+Python 3.13 is the currently validated environment. From the repository root:
 
-## 3. Install Dependencies
-
-
-pip install -r requirements.txt
-
-
-## 4. Run the Full Data Pipeline
-
-
-python3 scripts/run_pipeline.py
-
-
-The pipeline executes:
-
-
-Synthetic Data Generation
-        ↓
-SQL + Python Feature Engineering
-        ↓
-Behavioral Signals
-        ↓
-FinPulse Score
-        ↓
-Recommendations
-        ↓
-KMeans Segmentation
-
-
-Individual scripts can also be executed separately if required.
-
----
-
-## 5. Launch the Dashboard
-
-
+```bash
+python3 -m venv fenv
+source fenv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 streamlit run app/app.py
+```
 
+Open the **Analyze Statement** page from Streamlit navigation to use the FinPulse 2.0 upload workflow. The main page preserves the original synthetic-user dashboard. The analytical v1 variant can also be launched directly with `streamlit run app/app_v1.py`.
 
-The analytical V1 dashboard can be launched with:
+`fenv/` is local-only and must not be committed.
 
+## Testing
 
-streamlit run app/app_v1.py
+Run the complete suite with the project-local interpreter:
 
+```bash
+./fenv/bin/python -m pip install -r requirements-dev.txt
+./fenv/bin/python -m pytest
+```
 
----
+Current release validation: **145 passed**.
 
-# Technology Stack
+## Privacy and Security
 
-| Area                           | Technology                     |
-| ------------------------------ | ------------------------------ |
-| Programming                    | Python                         |
-| Data Processing                | Pandas, NumPy                  |
-| Database                       | SQLite                         |
-| Querying / Feature Engineering | SQL                            |
-| Machine Learning               | Scikit-learn                   |
-| Clustering                     | KMeans                         |
-| Model Evaluation               | Silhouette Score, Elbow Method |
-| Visualization                  | Plotly, Matplotlib             |
-| Dashboard                      | Streamlit                      |
-| Analysis                       | Jupyter Notebook               |
+- Uploaded statement bytes and reviewed transactions are held in Streamlit session state for the active session.
+- The upload workflow does not write statement data to `database/finpulse.db` or other repository files.
+- The bundled database is used by the preserved synthetic-user dashboard.
+- Included statement fixtures are synthetic and privacy-safe.
+- FinPulse does not claim end-to-end encryption or bank-grade data custody controls.
 
----
+For deployment, use platform secret management if future integrations require credentials. Do not commit `.env` or `.streamlit/secrets.toml` files.
 
-# Design Decisions
+## Limitations
 
-### Why Unsupervised Learning?
+- CSV and XLSX only; PDF statements are not yet supported.
+- Bank formats vary, and some may require manual column mapping.
+- Merchant descriptions can be incomplete or ambiguous; users should review categories.
+- The rule-based score is heuristic and not calibrated against real financial outcomes.
+- Uploaded-user scores are provisional because Stability is unavailable.
+- The K-Means reference population is synthetic and not production-validated.
+- Uploaded-user K-Means personas are intentionally withheld due to feature incompatibility.
+- No production bank API or Open Banking integration is implemented.
+- Uploaded data is session-only, so a browser/session reset loses the current review.
+- FinPulse is an educational portfolio project, not financial advice.
 
-A supervised model would require reliable labels describing the correct behavioral persona for every user.
+## Future Work
 
-Those labels are not available.
+- PDF statement parsing
+- Wider bank-format compatibility
+- Richer merchant metadata
+- Anonymized real-world model validation
+- Optional bank API or Open Banking integration
+- Improved categorization with richer transaction metadata and carefully evaluated NLP
 
-Therefore, FinPulse uses unsupervised learning to discover natural behavioral groupings directly from financial features.
+## Technology Stack
 
----
-
-### Why Keep Scoring Rule-Based?
-
-Financial scoring should remain understandable.
-
-A rule-based FinPulse Score makes it possible to explain exactly why a user gained or lost points.
-
-This complements KMeans:
-
-* KMeans answers: **Which behavioral group does this user resemble?**
-* FinPulse Score answers: **How healthy do the user's current financial patterns appear under the project's scoring framework?**
-
----
-
-### Why Use Both SQL and Python?
-
-SQL handles structured aggregation and trend calculations efficiently inside the database.
-
-Python is used for statistical calculations, modeling, analysis, and application logic.
-
-This creates a realistic analytical workflow instead of forcing all processing into one technology.
-
----
-
-# Limitations
-
-FinPulse is a portfolio and educational analytics project rather than a production financial product.
-
-Important limitations include:
-
-* The user population is synthetically generated.
-* Synthetic behavioral profiles are based on predefined assumptions.
-* Transaction categories are already available at a high level.
-* Merchant-level transaction classification is outside the current project scope.
-* Cluster names are human interpretations of unsupervised groups.
-* KMeans assumes relatively simple cluster geometry.
-* The FinPulse Score is heuristic and has not been statistically calibrated against real financial outcomes.
-* Recommendations are rule-based and are not personalized financial advice.
-* The project currently uses 12 months of historical behavior.
-* The what-if simulator is a simplified scenario tool rather than a forecasting model.
-
----
-
-# Future Improvements
-
-Potential future development could include:
-
-* Validation using real anonymized financial datasets
-* Longer multi-year transaction histories
-* Cluster stability analysis
-* Alternative clustering algorithms
-* Behavioral drift detection
-* More advanced peer-group comparisons
-* Real-time transaction ingestion
-* Improved recommendation personalization
-* Time-series forecasting with sufficient historical data
-* Production database migration from SQLite
-* Authentication and user-level privacy controls
-
-Large language models or RAG could also be explored in the future for natural-language financial explanations, but only where they provide meaningful value beyond the current deterministic recommendation engine.
-
----
-
-# What This Project Demonstrates
-
-FinPulse demonstrates an end-to-end data analytics and machine learning workflow involving:
-
-* Data generation and validation
-* Relational database design
-* Advanced SQL transformations
-* Feature engineering
-* Exploratory data analysis
-* Statistical behavioral analysis
-* Unsupervised machine learning
-* Model evaluation and interpretation
-* Explainable scoring systems
-* Rule-based recommendation systems
-* Dashboard development
-* End-to-end pipeline automation
-* Product-oriented presentation of analytical insights
-
-The focus of the project is not on using the maximum number of technologies, but on building a coherent analytics system where each component has a clear purpose.
-
----
-
-## Disclaimer
-
-FinPulse is an educational and portfolio project.
-
-The generated scores, behavioral segments, insights, simulations, and recommendations should not be interpreted as professional financial advice.
+Python, Pandas, NumPy, SQLite, SQL, scikit-learn, Plotly, Matplotlib, Streamlit, OpenPyXL, RapidFuzz, and Joblib.
