@@ -1,13 +1,22 @@
 import unittest
 
+import pandas as pd
+
 from finpulse.presentation import (
+    MONTHLY_CATEGORY_COLUMNS,
+    OTHER_INCLUDED_DEBITS,
+    build_monthly_spending_view,
     build_overview_metrics,
     format_inr,
+    format_month_label,
     format_percentage,
     largest_spending_category,
+    monthly_spending_observations,
+    monthly_spending_snapshot,
     spending_metric_label,
     spending_period_context,
 )
+from finpulse.upload_analytics import analyze_reviewed_transactions
 
 
 class PresentationHelperTests(unittest.TestCase):
@@ -73,6 +82,105 @@ class PresentationHelperTests(unittest.TestCase):
             largest_spending_category(category_summary),
             ("Essentials", 2_250.0),
         )
+
+    def test_twelve_month_view_is_complete_and_chronological(self):
+        rows = []
+        for month in pd.period_range("2025-07", periods=12, freq="M"):
+            rows.append(
+                {
+                    "month": str(month),
+                    "coverage_days": month.days_in_month,
+                    "days_in_month": month.days_in_month,
+                    "is_complete_month": True,
+                    "debit_transaction_count": 1,
+                    "income_category_debits": 0,
+                    "essentials": 1_000,
+                    "desire": 500,
+                    "repayment": 250,
+                    "investment_savings": 100,
+                    "others": 50,
+                    "total_debit_spending": 1_900,
+                }
+            )
+        view = build_monthly_spending_view(pd.DataFrame(rows), 2_000)
+        self.assertEqual(len(view), 12)
+        self.assertEqual(view.iloc[0]["month_key"], "2025-07")
+        self.assertEqual(view.iloc[-1]["month_key"], "2026-06")
+        self.assertEqual(
+            view["month_period"].tolist(),
+            sorted(view["month_period"].tolist()),
+        )
+        self.assertEqual(format_month_label("2026-06"), "June 2026")
+
+    def test_monthly_view_uses_only_reviewed_included_debits(self):
+        transactions = pd.DataFrame(
+            [
+                {
+                    "date": "2026-01-15",
+                    "amount": 100,
+                    "transaction_type": "debit",
+                    "predicted_category": "Essentials",
+                    "final_category": "Essentials",
+                    "include_in_analysis": True,
+                },
+                {
+                    "date": "2026-01-20",
+                    "amount": 200,
+                    "transaction_type": "debit",
+                    "predicted_category": "Desire",
+                    "final_category": "Desire",
+                    "include_in_analysis": False,
+                },
+                {
+                    "date": "2026-01-25",
+                    "amount": 10_000,
+                    "transaction_type": "credit",
+                    "predicted_category": "Income",
+                    "final_category": "Income",
+                    "include_in_analysis": True,
+                },
+                {
+                    "date": "2026-02-02",
+                    "amount": 300,
+                    "transaction_type": "debit",
+                    "predicted_category": "Essentials",
+                    "final_category": "Desire",
+                    "include_in_analysis": True,
+                },
+                {
+                    "date": "2026-02-10",
+                    "amount": 50,
+                    "transaction_type": "debit",
+                    "predicted_category": "Others",
+                    "final_category": "Others",
+                    "include_in_analysis": True,
+                },
+            ]
+        )
+        analytics = analyze_reviewed_transactions(transactions, 1_000, 500)
+        view = build_monthly_spending_view(analytics.monthly_summary, 500)
+
+        january = monthly_spending_snapshot(view, "2026-01")
+        february = monthly_spending_snapshot(view, "February 2026 (partial)")
+        self.assertEqual(january["Monthly Spending"], 100)
+        self.assertEqual(january["Essentials"], 100)
+        self.assertEqual(january["Desire"], 0)
+        self.assertEqual(january["Budget Used"], 0.2)
+        self.assertTrue(january["Partial Month"])
+        self.assertEqual(january["Coverage Days"], 17)
+
+        self.assertEqual(february["Monthly Spending"], 350)
+        self.assertEqual(february["Essentials"], 0)
+        self.assertEqual(february["Desire"], 300)
+        self.assertEqual(february["Budget Used"], 0.7)
+        for _, month in view.iterrows():
+            category_total = sum(month[label] for label in MONTHLY_CATEGORY_COLUMNS)
+            category_total += month[OTHER_INCLUDED_DEBITS]
+            self.assertEqual(category_total, month["Monthly Spending"])
+
+        observations = monthly_spending_observations(view)
+        self.assertIn("February 2026 had your highest spending", observations[0])
+        self.assertIn("January 2026 had your lowest spending", observations[1])
 
 
 if __name__ == "__main__":

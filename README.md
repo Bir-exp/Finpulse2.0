@@ -231,7 +231,7 @@ Run the complete suite with the project-local interpreter:
 ./fenv/bin/python -m pytest
 ```
 
-Current release validation: **152 passed**.
+Current release validation: **155 passed**.
 
 ## Privacy and Security
 

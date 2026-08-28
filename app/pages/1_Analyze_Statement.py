@@ -18,11 +18,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from finpulse.categorization import categorize_transactions  # noqa: E402
 from finpulse.presentation import (  # noqa: E402
+    MONTHLY_CATEGORY_COLUMNS,
+    OTHER_INCLUDED_DEBITS,
     SPENDING_CATEGORIES,
+    build_monthly_spending_view,
     build_overview_metrics,
     format_inr,
     format_percentage,
     largest_spending_category,
+    monthly_spending_observations,
+    monthly_spending_snapshot,
     statement_period_context,
 )
 from finpulse.reporting import (  # noqa: E402
@@ -509,6 +514,209 @@ def _render_advanced_analysis(report: FinPulseReport) -> None:
             st.json(diagnostics)
 
 
+def _render_full_statement_cash_flow(report: FinPulseReport) -> None:
+    with st.expander("Full statement cash flow"):
+        cash_flow = report.analytics.statement_cash_flow_summary
+        st.caption(statement_period_context(cash_flow))
+        cash_columns = st.columns(3)
+        cash_columns[0].metric(
+            "Observed Credits", format_inr(cash_flow["observed_credits"])
+        )
+        cash_columns[1].metric(
+            "Observed Debits", format_inr(cash_flow["observed_debits"])
+        )
+        cash_columns[2].metric(
+            "Net Statement Cash Flow",
+            format_inr(cash_flow["net_statement_cash_flow"]),
+        )
+        st.caption(
+            "Statement cash flow describes what happened in the full uploaded "
+            "statement. Monthly behavioral spending uses included debit "
+            "transactions only."
+        )
+
+
+def _monthly_chart_categories(monthly_view: pd.DataFrame) -> list[str]:
+    categories = list(MONTHLY_CATEGORY_COLUMNS)
+    if float(monthly_view[OTHER_INCLUDED_DEBITS].sum()) > 0:
+        categories.append(OTHER_INCLUDED_DEBITS)
+    return categories
+
+
+def _render_one_month_spending(
+    report: FinPulseReport,
+    monthly_view: pd.DataFrame,
+) -> None:
+    snapshot = monthly_spending_snapshot(
+        monthly_view, str(monthly_view.iloc[0]["month_key"])
+    )
+    st.subheader("Monthly Spending")
+    st.caption(
+        f"Included debit spending observed in {snapshot['Month']}."
+    )
+    top_columns = st.columns(2)
+    top_columns[0].metric(
+        "Monthly Spending", format_inr(snapshot["Monthly Spending"])
+    )
+    top_columns[1].metric("Included Transactions", snapshot["Transactions"])
+    if snapshot["Partial Month"]:
+        st.caption(
+            f"Partial month: {snapshot['Coverage Days']} of "
+            f"{snapshot['Days in Month']} days represented. Values are observed "
+            "amounts and are not extrapolated."
+        )
+
+    categories = _monthly_chart_categories(monthly_view)
+    category_rows = [
+        {"Category": category, "Amount": float(snapshot[category])}
+        for category in categories
+    ]
+    category_frame = pd.DataFrame(category_rows)
+    display_frame = category_frame.copy()
+    display_frame["Amount"] = display_frame["Amount"].map(format_inr)
+    st.dataframe(display_frame, width="stretch", hide_index=True)
+
+    positive = category_frame.loc[category_frame["Amount"] > 0]
+    if not positive.empty:
+        figure = px.pie(positive, names="Category", values="Amount", hole=0.55)
+        figure.update_layout(
+            legend_title_text="",
+            margin=dict(l=10, r=10, t=20, b=10),
+        )
+        st.plotly_chart(figure, width="stretch")
+
+    if snapshot["Budget Used"] is not None:
+        st.metric("Budget Used", format_percentage(snapshot["Budget Used"]))
+    _render_full_statement_cash_flow(report)
+
+
+def _render_multi_month_spending(
+    report: FinPulseReport,
+    monthly_view: pd.DataFrame,
+) -> None:
+    st.subheader("Your Spending Over Time")
+    st.caption(
+        f"Based on {len(monthly_view)} months of included debit transactions."
+    )
+
+    trend = px.line(
+        monthly_view,
+        x="Axis Month",
+        y="Monthly Spending",
+        markers=True,
+        custom_data=["Month Selector", "Coverage Days", "Days in Month"],
+    )
+    trend.update_traces(
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>Monthly spending: ₹%{y:,.0f}"
+            "<br>Coverage: %{customdata[1]} of %{customdata[2]} days<extra></extra>"
+        )
+    )
+    budget = report.analytics.budget_summary
+    if budget is not None:
+        trend.add_hline(
+            y=budget["monthly_budget"],
+            line_dash="dash",
+            annotation_text="Monthly budget",
+        )
+    trend.update_layout(
+        xaxis_title="",
+        yaxis_title="Included debit spending (₹)",
+        margin=dict(l=10, r=10, t=25, b=10),
+        hovermode="x unified",
+    )
+    trend.update_yaxes(tickprefix="₹", separatethousands=True)
+    st.plotly_chart(trend, width="stretch")
+    if bool(monthly_view["Partial Month"].any()):
+        st.caption(
+            "* Partial month. The chart shows actual included spending observed "
+            "during the covered days; no full-month extrapolation is applied."
+        )
+
+    st.markdown("#### Spending Categories Over Time")
+    categories = _monthly_chart_categories(monthly_view)
+    category_long = monthly_view[["Axis Month", *categories]].melt(
+        id_vars="Axis Month",
+        var_name="Category",
+        value_name="Amount",
+    )
+    category_chart = px.bar(
+        category_long,
+        x="Axis Month",
+        y="Amount",
+        color="Category",
+        barmode="stack",
+    )
+    category_chart.update_layout(
+        xaxis_title="",
+        yaxis_title="Included debit spending (₹)",
+        legend_title_text="",
+        margin=dict(l=10, r=10, t=20, b=10),
+    )
+    category_chart.update_yaxes(tickprefix="₹", separatethousands=True)
+    st.plotly_chart(category_chart, width="stretch")
+
+    st.markdown("#### View a Month")
+    selection = st.selectbox(
+        "View a month",
+        options=monthly_view["Month Selector"].tolist(),
+        label_visibility="collapsed",
+        key="monthly_spending_month_selector",
+    )
+    snapshot = monthly_spending_snapshot(monthly_view, selection)
+    snapshot_values = [
+        ("Monthly Spending", snapshot["Monthly Spending"]),
+        *[(category, snapshot[category]) for category in SPENDING_CATEGORIES],
+    ]
+    if snapshot[OTHER_INCLUDED_DEBITS] > 0:
+        snapshot_values.append(
+            (OTHER_INCLUDED_DEBITS, snapshot[OTHER_INCLUDED_DEBITS])
+        )
+    for start in range(0, len(snapshot_values), 3):
+        columns = st.columns(3)
+        for column, (label, value) in zip(columns, snapshot_values[start : start + 3]):
+            column.metric(label, format_inr(value))
+    if snapshot["Budget Used"] is not None:
+        st.metric("Budget Used", format_percentage(snapshot["Budget Used"]))
+    if snapshot["Partial Month"]:
+        st.caption(
+            f"Partial month: {snapshot['Coverage Days']} of "
+            f"{snapshot['Days in Month']} days represented. Snapshot values are "
+            "actual observed amounts, not extrapolated estimates."
+        )
+    else:
+        st.caption(
+            f"{snapshot['Transactions']} included debit transactions in "
+            f"{snapshot['Month']}."
+        )
+
+    composition_rows = [
+        {"Category": category, "Amount": float(snapshot[category])}
+        for category in categories
+    ]
+    composition = pd.DataFrame(composition_rows)
+    composition = composition.loc[composition["Amount"] > 0]
+    if not composition.empty:
+        composition_chart = px.pie(
+            composition,
+            names="Category",
+            values="Amount",
+            hole=0.55,
+        )
+        composition_chart.update_layout(
+            legend_title_text="",
+            margin=dict(l=10, r=10, t=20, b=10),
+        )
+        st.plotly_chart(composition_chart, width="stretch")
+
+    observations = monthly_spending_observations(monthly_view)
+    if observations:
+        st.markdown("#### Your Monthly Story")
+        for observation in observations:
+            st.markdown(f"- {observation}")
+    _render_full_statement_cash_flow(report)
+
+
 def _render_report(report: FinPulseReport) -> None:
     analytics = report.analytics
     statement = analytics.statement_summary
@@ -616,60 +824,19 @@ def _render_report(report: FinPulseReport) -> None:
                 )
 
     with spending_tab:
-        st.subheader("Average Monthly Spending by Category")
-        st.caption(overview["period_context"])
-        monthly_rows = []
-        statement_rows = []
-        display_categories = list(SPENDING_CATEGORIES)
-        if analytics.category_summary["Income"]["monthly_normalized"] > 0:
-            display_categories.append("Income")
-        for category in display_categories:
-            category_values = analytics.category_summary[category]
-            label = "Income-labelled debit" if category == "Income" else category
-            monthly_rows.append(
-                {
-                    "Category": label,
-                    "Monthly Average": format_inr(
-                        category_values["monthly_normalized"]
-                    ),
-                }
-            )
-            statement_rows.append(
-                {
-                    "Category": label,
-                    "Full Statement Total": format_inr(category_values["total"]),
-                    "Transactions": category_values["transaction_count"],
-                }
-            )
-        st.dataframe(pd.DataFrame(monthly_rows), width="stretch", hide_index=True)
-        with st.expander("Statement-period category totals"):
-            st.caption(
-                "These totals cover the included debit transactions across the full "
-                "analyzed period; they are not monthly spending values."
-            )
-            st.dataframe(
-                pd.DataFrame(statement_rows), width="stretch", hide_index=True
-            )
-
-        with st.expander("Full statement cash flow"):
-            cash_flow = analytics.statement_cash_flow_summary
-            st.caption(statement_period_context(cash_flow))
-            cash_columns = st.columns(3)
-            cash_columns[0].metric(
-                "Observed Credits", format_inr(cash_flow["observed_credits"])
-            )
-            cash_columns[1].metric(
-                "Observed Debits", format_inr(cash_flow["observed_debits"])
-            )
-            cash_columns[2].metric(
-                "Net Statement Cash Flow",
-                format_inr(cash_flow["net_statement_cash_flow"]),
-            )
-            st.caption(
-                "Statement cash flow describes what happened in the full uploaded "
-                "statement. FinPulse behavioral analytics use Monthly Available "
-                "Amount and included debit transactions only."
-            )
+        monthly_budget = (
+            analytics.budget_summary["monthly_budget"]
+            if analytics.budget_summary is not None
+            else None
+        )
+        monthly_view = build_monthly_spending_view(
+            analytics.monthly_summary,
+            monthly_budget,
+        )
+        if statement["transaction_month_count"] > 1:
+            _render_multi_month_spending(report, monthly_view)
+        else:
+            _render_one_month_spending(report, monthly_view)
 
     with improve_tab:
         st.subheader("What to Focus On")
