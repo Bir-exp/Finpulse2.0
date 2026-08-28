@@ -429,28 +429,19 @@ def _render_advanced_analysis(report: FinPulseReport) -> None:
     st.subheader("Score Components")
     component_names = {
         "spending_control": "Spending Control",
-        "savings": "Savings",
-        "debt_management": "Debt Management",
-        "stability": "Stability",
+        "saving_investment": "Saving & Investment",
+        "repayment_management": "Repayment Management",
     }
-    component_columns = st.columns(4)
+    component_columns = st.columns(3)
     for column, (key, component) in zip(
         component_columns, score["components"].items()
     ):
-        value = (
-            f"{component['score']} / {component['maximum']}"
-            if component["available"]
-            else "Unavailable"
-        )
         column.metric(
             component_names[key],
-            value,
-            help=component.get("unavailable_reason"),
+            f"{component['score']} / {component['max_score']}",
         )
-    if report.score_presentation.is_provisional:
-        st.warning(report.score_presentation.explanation)
-    else:
-        st.caption(report.score_presentation.explanation)
+        column.caption(component["explanation"])
+    st.caption(report.score_presentation.explanation)
 
     st.subheader("Report Confidence and Coverage")
     quality = analytics.data_quality
@@ -763,14 +754,7 @@ def _render_report(report: FinPulseReport) -> None:
             else "Unavailable"
         )
         second_row[1].metric("FinPulse Score", score_text)
-        score_caption = str(overview["score_band"] or "")
-        if overview["provisional"]:
-            score_caption += " · PROVISIONAL"
-        second_row[1].caption(score_caption)
-        if overview["provisional"]:
-            second_row[1].caption(
-                "Based on the behavioral components currently available."
-            )
+        second_row[1].caption(str(overview["score_band"] or ""))
 
         budget = analytics.budget_summary
         if budget is not None:

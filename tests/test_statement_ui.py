@@ -77,9 +77,9 @@ class AnalyzeStatementPresentationTests(unittest.TestCase):
             overview_metrics["Average Monthly Spending"],
             format_inr(statement["total_debit_spending"]),
         )
-        self.assertIn(
-            "PROVISIONAL", " ".join(caption.value for caption in app.tabs[0].caption)
-        )
+        overview_copy = " ".join(caption.value for caption in app.tabs[0].caption)
+        self.assertNotIn("PROVISIONAL", overview_copy)
+        self.assertNotIn("Stability unavailable", overview_copy)
 
         overview_text = " ".join(
             [
@@ -116,8 +116,14 @@ class AnalyzeStatementPresentationTests(unittest.TestCase):
         advanced_labels = {metric.label for metric in app.tabs[4].metric}
         self.assertIn("Expense ratio", advanced_labels)
         self.assertIn("Spending Control", advanced_labels)
-        self.assertIn("Stability", advanced_labels)
+        self.assertIn("Saving & Investment", advanced_labels)
+        self.assertIn("Repayment Management", advanced_labels)
+        self.assertNotIn("Stability", advanced_labels)
         self.assertIn("Report Confidence", advanced_labels)
+        advanced_values = {metric.label: metric.value for metric in app.tabs[4].metric}
+        self.assertTrue(advanced_values["Spending Control"].endswith("/ 40"))
+        self.assertTrue(advanced_values["Saving & Investment"].endswith("/ 35"))
+        self.assertTrue(advanced_values["Repayment Management"].endswith("/ 25"))
 
         transaction_text = " ".join(
             markdown.value for markdown in app.tabs[3].markdown

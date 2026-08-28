@@ -174,11 +174,14 @@ class StatementFixtureCompatibilityTests(unittest.TestCase):
                     review_confirmed=True,
                 )
                 self.assert_report_reconciles(report)
-                self.assertTrue(report.score_presentation.is_provisional)
-                self.assertFalse(
-                    report.analytics.score_result["components"]["stability"][
-                        "available"
-                    ]
+                self.assertFalse(report.score_presentation.is_provisional)
+                self.assertEqual(
+                    set(report.analytics.score_result["components"]),
+                    {
+                        "spending_control",
+                        "saving_investment",
+                        "repayment_management",
+                    },
                 )
                 self.assertFalse(report.persona.persona_available)
                 if spec["monthly_budget"] is None:

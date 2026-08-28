@@ -154,26 +154,29 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(report.persona.persona_confidence, "Unavailable")
         self.assertTrue(report.persona.reasons)
 
-    def test_provisional_score_is_labelled(self):
+    def test_upload_score_is_complete_and_confidence_is_separate(self):
         report = generate_financial_report(
             reviewed_frame(), 5000, review_confirmed=True
         )
         display = report.score_presentation
-        self.assertTrue(display.is_provisional)
-        self.assertEqual(display.status_label, "PROVISIONAL")
-        self.assertIn("80 points", display.explanation)
-        self.assertIn("not equivalent", display.explanation)
+        self.assertFalse(display.is_provisional)
+        self.assertEqual(display.status_label, "COMPLETE 100-POINT FRAMEWORK")
+        self.assertIn("three observable", display.explanation)
+        self.assertIn("Report Confidence", display.explanation)
+        self.assertEqual(report.analytics.data_quality["analytical_confidence"], "Low")
 
-    def test_full_history_score_is_not_labelled_provisional(self):
+    def test_score_presentation_requires_upload_component_contract(self):
         display = build_score_presentation(
             {
-                "is_provisional": False,
-                "renormalized_for_unavailable_components": False,
-                "components": {"stability": {"available": True}},
+                "components": {
+                    "spending_control": {},
+                    "saving_investment": {},
+                    "repayment_management": {},
+                },
             }
         )
         self.assertFalse(display.is_provisional)
-        self.assertEqual(display.status_label, "FULL-HISTORY")
+        self.assertEqual(display.status_label, "COMPLETE 100-POINT FRAMEWORK")
         self.assertNotIn("provisional", display.explanation.lower())
 
     def test_absent_monthly_budget_does_not_error(self):

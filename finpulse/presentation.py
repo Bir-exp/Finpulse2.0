@@ -142,9 +142,8 @@ def build_overview_metrics(
         ),
         "spending_label": spending_metric_label(statement_summary),
         "period_context": spending_period_context(statement_summary),
-        "score": score_result.get("finpulse_score"),
+        "score": score_result.get("total_score", score_result.get("finpulse_score")),
         "score_band": score_result.get("score_band"),
-        "provisional": bool(score_result.get("is_provisional", False)),
     }
 
 

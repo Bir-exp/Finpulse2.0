@@ -105,7 +105,11 @@ Merchant descriptions can be incomplete or ambiguous, so classification is not a
 
 ## Explainable Behavioral Score
 
-The FinPulse score is rule-based so its components remain understandable:
+FinPulse uses separate rule-based score contracts for its two data paths. The
+scores are educational heuristics and have not been clinically, financially,
+or outcome validated.
+
+### FinPulse v1 synthetic-user score
 
 | Component | Maximum points |
 | --- | ---: |
@@ -115,7 +119,56 @@ The FinPulse score is rule-based so its components remain understandable:
 | Stability | 20 |
 | **Total** | **100** |
 
-For uploaded statements, Stability is unavailable because arbitrary bank credits are not treated as verified recurring income history. Uploaded-user scores are therefore clearly marked **PROVISIONAL**: the available 80 points are normalized to 100, and the missing Stability component is not fabricated or silently replaced.
+This original four-component contract remains unchanged for the synthetic-user
+dashboard.
+
+### FinPulse 2.0 uploaded-statement score
+
+| Component | Subcomponents | Maximum points |
+| --- | --- | ---: |
+| Spending Control | Overall spending 20 + Desire control 12 + spending discipline 8 | 40 |
+| Saving & Investment Behavior | Explicit Investment/Savings 20 + estimated unspent capacity 15 | 35 |
+| Repayment Management | Monthly repayment burden | 25 |
+| **Total** |  | **100** |
+
+The upload score uses Monthly Available Amount and included debit transactions
+with reviewed `final_category` values. Arbitrary statement credits are not
+reliable evidence of recurring income, so credits do not enter this score. The
+upload score therefore has no Stability component and does not renormalize an
+incomplete v1 score.
+
+The transparent thresholds are:
+
+- Overall spending ratio points: `≤60%: 20`, `≤75%: 18`, `≤90%: 14`,
+  `≤100%: 9`, `≤110%: 4`, `>110%: 0`.
+- Desire ratio points: `≤5%: 12`, `≤10%: 10`, `≤15%: 7`, `≤25%: 3`,
+  `>25%: 0`.
+- Overspending-month discipline points: `0%: 8`, `≤15%: 6`, `≤30%: 4`,
+  `≤50%: 2`, `>50%: 0`.
+- Explicit Investment/Savings ratio points: `≥20%: 20`, `≥15%: 17`,
+  `≥10%: 14`, `≥5%: 9`, `>0%: 4`, `0%: 0`.
+- Estimated unspent-capacity ratio points: `≥30%: 15`, `≥20%: 12`,
+  `≥10%: 9`, `≥0%: 5`, `<0%: 0`.
+- Repayment ratio points: `≤5%: 25`, `≤10%: 23`, `≤20%: 19`,
+  `≤30%: 13`, `≤40%: 7`, `>40%: 3`.
+
+Investment/Savings transactions are included in total debit spending. Their
+explicit-allocation points recognize observable saving behavior, while the
+estimated remainder is calculated after all included debits, so the same
+transaction does not also inflate the remainder. Estimated remainder is not
+presented as confirmed savings.
+
+When a monthly budget is supplied, budget utilization refines only the
+eight-point spending-discipline subcomponent: `≤90%: 8`, `≤100%: 6`,
+`≤110%: 3`, `>110%: 0`. The stricter of budget adherence and observed
+capacity-overspending points is used. Without a budget, all eight points remain
+available from observed overspending behavior, so omitting a budget creates no
+structural score penalty.
+
+Both score paths retain the existing bands: **Strong** `80–100`, **Stable**
+`65–79`, **Watchful** `50–64`, **Strained** `35–49`, and **High Pressure**
+`0–34`. Report Confidence remains separate and can be Low even when the upload
+score is calculated out of 100.
 
 ## K-Means / ML
 
@@ -231,7 +284,7 @@ Run the complete suite with the project-local interpreter:
 ./fenv/bin/python -m pytest
 ```
 
-Current release validation: **155 passed**.
+Current release validation: **170 passed**.
 
 ## Privacy and Security
 
@@ -249,7 +302,8 @@ For deployment, use platform secret management if future integrations require cr
 - Bank formats vary, and some may require manual column mapping.
 - Merchant descriptions can be incomplete or ambiguous; users should review categories.
 - The rule-based score is heuristic and not calibrated against real financial outcomes.
-- Uploaded-user scores are provisional because Stability is unavailable.
+- Uploaded-user Report Confidence may be Low for short or low-volume statements,
+  independently of the complete 100-point behavioral score.
 - The K-Means reference population is synthetic and not production-validated.
 - Uploaded-user K-Means personas are intentionally withheld due to feature incompatibility.
 - No production bank API or Open Banking integration is implemented.

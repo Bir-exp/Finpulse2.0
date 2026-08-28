@@ -53,13 +53,14 @@ class PresentationHelperTests(unittest.TestCase):
         }
         overview = build_overview_metrics(
             statement,
-            {"finpulse_score": 72, "score_band": "Good", "is_provisional": True},
+            {"total_score": 72, "score_band": "Stable"},
         )
         self.assertEqual(overview["monthly_spending"], 30_000)
         self.assertNotEqual(overview["monthly_spending"], 90_000)
         self.assertEqual(overview["spending_label"], "Average Monthly Spending")
         self.assertIn("3 months", overview["period_context"])
-        self.assertTrue(overview["provisional"])
+        self.assertEqual(overview["score"], 72)
+        self.assertNotIn("provisional", overview)
 
     def test_one_month_label_and_context_are_clear(self):
         statement = {

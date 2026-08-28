@@ -148,10 +148,8 @@ class EndToEndUploadTests(unittest.TestCase):
             report.analytics.behavioral_features["monthly_reference_amount"],
             50_000,
         )
-        self.assertTrue(report.score_presentation.is_provisional)
-        self.assertFalse(
-            report.analytics.score_result["components"]["stability"]["available"]
-        )
+        self.assertFalse(report.score_presentation.is_provisional)
+        self.assertNotIn("stability", report.analytics.score_result["components"])
         self.assertFalse(report.persona.persona_available)
         self.assertIsNotNone(report.analytics.budget_summary)
         self.assert_reconciled(report)

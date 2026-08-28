@@ -124,15 +124,15 @@ class UploadAnalyticsTests(unittest.TestCase):
         self.assertEqual(result.observed_income_summary["total_credit_inflow"], 0)
         self.assertIsNone(result.behavioral_features["income_cv"])
 
-    def test_upload_stability_is_unavailable_even_with_long_credit_history(self):
+    def test_credit_derived_income_variability_remains_unavailable(self):
         rows = repeated_full_months(6)
         result = analyze_reviewed_transactions(pd.DataFrame(rows), 5000)
-        stability = result.score_result["components"]["stability"]
-        self.assertFalse(stability["available"])
-        self.assertIsNone(stability["score"])
         self.assertIsNone(result.behavioral_features["income_cv"])
-        self.assertTrue(result.score_result["is_provisional"])
-        self.assertIn("bank credits", stability["unavailable_reason"])
+        self.assertNotIn("stability", result.score_result["components"])
+        self.assertEqual(
+            set(result.score_result["components"]),
+            {"spending_control", "saving_investment", "repayment_management"},
+        )
 
     def test_excluded_debit_does_not_count_toward_spending(self):
         rows = [
@@ -155,6 +155,10 @@ class UploadAnalyticsTests(unittest.TestCase):
             1000,
         )
         self.assertEqual(result.statement_cash_flow_summary["observed_debits"], 21000)
+        baseline = analyze_reviewed_transactions(
+            pd.DataFrame([rows[0]]), 5000
+        )
+        self.assertEqual(result.score_result, baseline.score_result)
 
     def test_excluded_desire_does_not_affect_ratio(self):
         rows = [
@@ -320,6 +324,18 @@ class UploadAnalyticsTests(unittest.TestCase):
         self.assertEqual(result.category_summary["Essentials"]["total"], 1000)
         self.assertEqual(result.category_summary["Desire"]["total"], 0)
 
+    def test_final_category_correction_affects_score_components(self):
+        essentials = transaction("2024-01-01", 1500, "debit", "Essentials")
+        desire = dict(essentials, final_category="Desire")
+        essential_result = analyze_reviewed_transactions(
+            pd.DataFrame([essentials]), 5000
+        )
+        desire_result = analyze_reviewed_transactions(pd.DataFrame([desire]), 5000)
+        self.assertGreater(
+            essential_result.score_result["components"]["spending_control"]["score"],
+            desire_result.score_result["components"]["spending_control"]["score"],
+        )
+
     def test_predicted_category_does_not_affect_analytics(self):
         first = transaction("2024-01-01", 500, "debit", "Others", predicted_category="Desire")
         second = dict(first, predicted_category="Essentials")
@@ -409,10 +425,17 @@ class UploadAnalyticsTests(unittest.TestCase):
         )
         self.assertEqual(
             set(result.score_result["components"]),
-            {"spending_control", "savings", "debt_management", "stability"},
+            {"spending_control", "saving_investment", "repayment_management"},
         )
-        self.assertFalse(result.score_result["components"]["stability"]["available"])
-        self.assertTrue(result.score_result["renormalized_for_unavailable_components"])
+        self.assertEqual(
+            sum(
+                component["max_score"]
+                for component in result.score_result["components"].values()
+            ),
+            100,
+        )
+        self.assertNotIn("available_maximum", result.score_result)
+        self.assertNotIn("renormalized_for_unavailable_components", result.score_result)
 
     def test_short_history_suppresses_trend_and_stability_claims(self):
         result = analyze_reviewed_transactions(
@@ -433,8 +456,46 @@ class UploadAnalyticsTests(unittest.TestCase):
         self.assertIsNone(result.behavioral_features["income_cv"])
         self.assertIsNone(result.behavioral_features["income_change_3m"])
         self.assertIsNotNone(result.behavioral_features["desire_ratio_change_3m"])
-        self.assertFalse(result.score_result["components"]["stability"]["available"])
-        self.assertTrue(result.score_result["is_provisional"])
+        self.assertNotIn("stability", result.score_result["components"])
+
+    def test_one_and_multi_month_uploads_use_the_same_complete_framework(self):
+        one_month = pd.DataFrame([
+            transaction("2024-01-01", 1000, "debit", "Essentials"),
+            transaction("2024-01-31", 1000, "debit", "Investment/Savings"),
+        ])
+        multi_month_rows = []
+        for period in pd.period_range("2024-01", periods=3, freq="M"):
+            multi_month_rows.extend([
+                transaction(period.start_time, 1000, "debit", "Essentials"),
+                transaction(
+                    period.end_time.normalize(),
+                    1000,
+                    "debit",
+                    "Investment/Savings",
+                ),
+            ])
+        one = analyze_reviewed_transactions(one_month, 5000)
+        multi = analyze_reviewed_transactions(pd.DataFrame(multi_month_rows), 5000)
+        self.assertEqual(one.score_result["total_score"], multi.score_result["total_score"])
+        self.assertEqual(
+            set(one.score_result["components"]), set(multi.score_result["components"])
+        )
+        self.assertEqual(
+            sum(item["max_score"] for item in one.score_result["components"].values()),
+            100,
+        )
+
+    def test_report_confidence_is_independent_of_score_completeness(self):
+        result = analyze_reviewed_transactions(
+            pd.DataFrame([transaction("2024-01-01", 1000, "debit", "Investment/Savings")]),
+            5000,
+        )
+        self.assertEqual(result.data_quality["analytical_confidence"], "Low")
+        self.assertEqual(
+            sum(item["max_score"] for item in result.score_result["components"].values()),
+            100,
+        )
+        self.assertNotIn("is_provisional", result.score_result)
 
     def test_empty_input_fails_clearly(self):
         with self.assertRaisesRegex(ValueError, "at least one transaction"):

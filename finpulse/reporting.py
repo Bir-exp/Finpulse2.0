@@ -199,36 +199,22 @@ def build_report_signature(
 
 
 def build_score_presentation(score_result: dict[str, Any]) -> ScorePresentation:
-    provisional = bool(score_result.get("is_provisional", False))
-    stability = score_result.get("components", {}).get("stability", {})
-    stability_available = bool(stability.get("available", False))
-    renormalized = bool(
-        score_result.get("renormalized_for_unavailable_components", False)
-    )
-
-    if provisional and not stability_available and renormalized:
-        unavailable_reason = stability.get(
-            "unavailable_reason",
-            "Uploaded bank credits are not treated as recurring income history.",
-        )
-        explanation = (
-            f"Stability is unavailable. {unavailable_reason} The available 80 points "
-            "were normalized to 100, so this score is provisional and is not "
-            "equivalent to a full-history score."
-        )
-    elif provisional:
-        explanation = (
-            "This score is provisional because some history-dependent evidence "
-            "or overall report confidence is limited."
-        )
-    else:
-        explanation = (
-            "All four score components are available from the uploaded history."
-        )
+    components = score_result.get("components", {})
+    expected_components = {
+        "spending_control",
+        "saving_investment",
+        "repayment_management",
+    }
+    if set(components) != expected_components:
+        raise ValueError("Uploaded score must contain the dedicated 40/35/25 components")
     return ScorePresentation(
-        is_provisional=provisional,
-        status_label="PROVISIONAL" if provisional else "FULL-HISTORY",
-        explanation=explanation,
+        is_provisional=False,
+        status_label="COMPLETE 100-POINT FRAMEWORK",
+        explanation=(
+            "This uploaded-statement score uses three observable behavioral "
+            "components totaling 100 points. Report Confidence separately "
+            "describes how much statement evidence supports the result."
+        ),
     )
 
 

@@ -1,7 +1,7 @@
 """In-memory cash-flow reporting and debit-based behavioral analytics.
 
 The upload path deliberately does not use SQLite. It adapts reviewed statement
-data to the existing FinPulse score, signal, and recommendation functions.
+data to the dedicated upload score and existing signal/recommendation functions.
 Full statement credits/debits remain informational; only included debits and
 the declared Monthly Available Amount contribute to behavioral features.
 """
@@ -16,13 +16,6 @@ import numpy as np
 import pandas as pd
 
 from scripts.recommendation_engine import generate_recommendations
-from scripts.score_engine import (
-    debt_score,
-    savings_score,
-    score_band,
-    spending_control_score,
-    stability_score,
-)
 from scripts.signal_engine import generate_signals
 
 from .review import (
@@ -30,6 +23,7 @@ from .review import (
     validate_final_categories,
     validate_include_in_analysis,
 )
+from .upload_score import calculate_upload_behavioral_score
 
 
 CATEGORY_AMOUNT_COLUMNS = {
@@ -434,98 +428,6 @@ def _legacy_adapter(features: dict[str, Any]) -> dict[str, Any]:
     return adapted
 
 
-def _score_upload(
-    features: dict[str, Any],
-    stability_available: bool,
-    trend_available: bool,
-    analytical_confidence: str,
-) -> dict[str, Any]:
-    adapted = _legacy_adapter(features)
-    spending = int(spending_control_score(adapted))
-    savings = int(savings_score(adapted))
-    debt = int(debt_score(adapted))
-    stability = int(stability_score(adapted)) if stability_available else None
-
-    components = {
-        "spending_control": {
-            "score": spending,
-            "maximum": 30,
-            "available": True,
-            "inputs": {
-                "avg_expense_ratio": features["avg_expense_ratio"],
-                "overspending_month_ratio": features["overspending_month_ratio"],
-            },
-        },
-        "savings": {
-            "score": savings,
-            "maximum": 25,
-            "available": True,
-            "inputs": {
-                "avg_investment_ratio": features["avg_investment_ratio"],
-                "investment_ratio_change_3m": features[
-                    "investment_ratio_change_3m"
-                ],
-            },
-            "trend_adjustment_applied": trend_available,
-        },
-        "debt_management": {
-            "score": debt,
-            "maximum": 25,
-            "available": True,
-            "inputs": {
-                "avg_repayment_ratio": features["avg_repayment_ratio"],
-                "repayment_ratio_change_3m": features[
-                    "repayment_ratio_change_3m"
-                ],
-            },
-            "trend_adjustment_applied": trend_available,
-        },
-        "stability": {
-            "score": stability,
-            "maximum": 20,
-            "available": stability_available,
-            "inputs": {
-                "income_cv": features["income_cv"],
-                "expense_ratio_volatility": features[
-                    "expense_ratio_volatility"
-                ],
-                "avg_surplus_ratio": features["avg_surplus_ratio"],
-            },
-            "unavailable_reason": (
-                None
-                if stability_available
-                else (
-                    "Unavailable for uploaded statements because bank credits "
-                    "are not treated as reliable recurring income history."
-                )
-            ),
-        },
-    }
-
-    raw_available = spending + savings + debt + (stability or 0)
-    available_maximum = 100 if stability_available else 80
-    normalized_score = int(round(raw_available / available_maximum * 100))
-    provisional = (
-        not stability_available
-        or not trend_available
-        or analytical_confidence != "High"
-    )
-    return {
-        "finpulse_score": normalized_score,
-        "score_band": score_band(normalized_score),
-        "raw_available_score": raw_available,
-        "available_maximum": available_maximum,
-        "is_provisional": provisional,
-        "renormalized_for_unavailable_components": not stability_available,
-        "components": components,
-        "method": (
-            "Existing FinPulse component rules. When stability is unavailable, "
-            "the available 80 points are renormalized to 100; unavailable trend "
-            "adjustments are neutral and explicitly marked."
-        ),
-    }
-
-
 def _analytical_quality(
     transactions: pd.DataFrame,
     coverage_days: int,
@@ -543,11 +445,6 @@ def _analytical_quality(
         )
     if coverage_days < 30:
         warnings.append("Included-debit coverage is shorter than 30 days.")
-    if not stability_available:
-        warnings.append(
-            "The Stability component is unavailable because statement credits "
-            "are not treated as recurring income history."
-        )
     if not trend_available:
         warnings.append("Three-month trend claims are unavailable.")
     if (transactions["final_category"] == "Income").any():
@@ -563,7 +460,6 @@ def _analytical_quality(
         len(transactions) >= 90
         and coverage_days >= 180
         and complete_months >= 6
-        and stability_available
         and trend_available
     ):
         confidence = "High"
@@ -605,7 +501,7 @@ def analyze_reviewed_transactions(
     monthly_available_amount: float,
     monthly_budget: float | None = None,
 ) -> UploadAnalyticsResult:
-    """Build upload-specific features and legacy rule outputs entirely in memory."""
+    """Build upload-specific features and rule outputs entirely in memory."""
 
     (
         statement_transactions,
@@ -768,12 +664,7 @@ def analyze_reviewed_transactions(
         ),
     }
 
-    score_result = _score_upload(
-        features,
-        stability_available,
-        trend_available,
-        data_quality["analytical_confidence"],
-    )
+    score_result = calculate_upload_behavioral_score(features, budget_summary)
     legacy_features = _legacy_adapter(features)
     signals = [
         _upload_specific_language(signal)
